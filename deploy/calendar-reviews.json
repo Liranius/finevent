@@ -1,0 +1,54 @@
+{
+  "calendar-release-20261031T085253Z-8e0911b9": {
+    "report_sha256": "21f98f00251d954a92eaf002b98313dbd698fdf1833fe6fa8cbbc535b6d4c242",
+    "review_id": "calendar-observation-review-20261031T163304Z-f80c1674",
+    "review_sha256": "4bf17fcd875827f2456ab4edda3daaf5c072481ea7cad896a421eb70c9942f4b",
+    "decision": "accepted_with_recovered_source_failures",
+    "reason": "Two cls-depth failures at 2026-10-31 18:00 and 20:00 Asia/Shanghai recovered in the next 30-minute cycle; all nine sources succeeded in three follow-up cycles. Original failures remain recorded; complete news coverage is not claimed."
+  },
+  "calendar-release-20261101T125001Z-dc6476bf": {
+    "report_sha256": "b072d5b27bab760e1d694ca7097b080056b68c85cb8403e3631f7b0e304e4c96",
+    "review_id": "calendar-observation-review-20261101T140910Z-104d1e9c",
+    "review_sha256": "19af0d310175f64b4a1a47dd0c4da7ac40203abd1cf294687a7473a44013c574",
+    "decision": "accepted_with_recovered_source_failures",
+    "reason": "The v2ex failure at 2026-11-01 21:00 Asia/Shanghai recovered at 21:30; all nine sources succeeded in both follow-up cycles at 21:30 and 22:01. Original failure remains recorded; complete news coverage and a failure cause are not inferred."
+  },
+  "calendar-release-20261101T154619Z-8174b8be": {
+    "report_sha256": "a3048c45fe04f064a61ff49286fa23e1ec490490540bb04e0722fcbc6120f6d3",
+    "review_id": "calendar-observation-review-20261102T095730Z-43b54438",
+    "review_sha256": "dba1cb3089bd1fabcbe717588a1059b5bcf6d475255bcc48de97f73c14e04af0",
+    "decision": "accepted_with_recovered_source_failures",
+    "followup_scope": "first_two_after_observation",
+    "expected_sources": [
+      "cankaoxiaoxi",
+      "cls-depth",
+      "cls-hot",
+      "cls-telegraph",
+      "ifeng",
+      "juejin",
+      "v2ex",
+      "wallstreetcn-quick",
+      "zaobao"
+    ],
+    "reason": "Maintainer approved the fixed first two chronological post-observation cycles: 2026-11-02 01:00 and 01:31 Asia/Shanghai, all nine sources successful. Original wallstreetcn-quick failure at 00:31 recovered at 01:00. Six later source failures remain in the diagnostic and operational tracking; the latest 17:30 cycle is healthy. No claim of uninterrupted coverage or long-term stability."
+  },
+  "calendar-release-20261102T115212Z-2dc2fbd7": {
+    "report_sha256": "9d979213d41193d6578cfe78a538e354caa9ee084085352e4e5df7373b3e4938",
+    "review_id": "calendar-observation-review-20261102T133756Z-a833d473",
+    "review_sha256": "1d2de3285a78dddea1761c0a51b94b9641c5bf67feadc17c453de82e65e94020",
+    "decision": "accepted_with_recovered_source_failures",
+    "followup_scope": "first_two_after_observation",
+    "expected_sources": [
+      "cankaoxiaoxi",
+      "cls-depth",
+      "cls-hot",
+      "cls-telegraph",
+      "ifeng",
+      "juejin",
+      "v2ex",
+      "wallstreetcn-quick",
+      "zaobao"
+    ],
+    "reason": "Using the approved fixed first-two-cycle scope: cls-telegraph failed at 2026-11-02 20:30 Asia/Shanghai and first succeeded at 21:00 (30 minutes). The first two chronological post-observation cycles at 21:00 and 21:30 both contain all nine successful sources. The latest cycle is healthy as of the 21:38:05 diagnostic. Original failures and prior operational issues remain preserved; uninterrupted coverage and a failure cause are not inferred."
+  }
+}
