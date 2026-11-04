@@ -1,0 +1,15 @@
+{
+  "id": "/finevent/",
+  "name": "finevent 财经事件",
+  "short_name": "finevent",
+  "lang": "zh-CN",
+  "start_url": "/finevent/",
+  "scope": "/finevent/",
+  "display": "standalone",
+  "background_color": "#f4f3ee",
+  "theme_color": "#f4f3ee",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
