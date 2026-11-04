@@ -1,0 +1,17 @@
+/.idea/
+node_modules/
+dist/
+var/
+.validation/
+release/
+bin/
+coverage/
+playwright-report/
+test-results/
+.env.local
+.env.*.local
+*.log
+*.tsbuildinfo
+.eslintcache
+__pycache__/
+*.pyc
