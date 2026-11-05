@@ -9,7 +9,7 @@ async function login(page: Page) {
   await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeVisible();
 }
 
-test('基金：草稿持久化、人工确认、区间修改与取消', async ({ page }) => {
+test('基金：草稿持久化、人工确认、区间修改与取消', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 393, height: 852 });
   await login(page);
   await page.getByRole('button', { name: '基金录入', exact: true }).click();
@@ -26,7 +26,7 @@ test('基金：草稿持久化、人工确认、区间修改与取消', async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  await page.screenshot({ path: 'test-results/calendar-mobile-fund.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('calendar-mobile-fund.png'), fullPage: true });
   await page.reload();
   await expect(page.getByLabel('基金代码', { exact: true })).toHaveValue('123456');
   await page.getByLabel('事件名称').fill('测试基金赎回窗口');
@@ -47,10 +47,10 @@ test('基金：草稿持久化、人工确认、区间修改与取消', async ({
   await page.getByText('修订记录 · 3 版', { exact: true }).click();
   await expect(page.getByText('第 1 版 · 已确认', { exact: true })).toBeVisible();
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.screenshot({ path: 'test-results/calendar-fund-detail.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('calendar-fund-detail.png'), fullPage: true });
 });
 
-test('日历：补录时刻、月份切换、日期选择、窄屏议程', async ({ page }) => {
+test('日历：补录时刻、月份切换、日期选择、窄屏议程', async ({ page }, testInfo) => {
   await login(page);
   await page.getByRole('button', { name: '补录事件' }).click();
   await expect(page.getByRole('heading', { name: '补录官方事件' })).toBeFocused();
@@ -65,14 +65,17 @@ test('日历：补录时刻、月份切换、日期选择、窄屏议程', async
   await page.getByRole('button', { name: '日历', exact: true }).click();
   await page.getByRole('button', { name: '2026-11-05，', exact: false }).click();
   await expect(page.getByRole('button', { name: /测试宏观发布/ })).toBeVisible();
-  await page.screenshot({ path: 'test-results/calendar-desktop-month.png', fullPage: true });
+  await page.screenshot({
+    path: testInfo.outputPath('calendar-desktop-month.png'),
+    fullPage: true,
+  });
   await page.getByRole('button', { name: '下个月' }).click();
   await expect(page.getByRole('heading', { name: '2026 年 12 月' })).toBeVisible();
   await page.getByRole('button', { name: '上个月' }).click();
   await page.getByRole('button', { name: '议程', exact: true }).click();
   await page.getByText('官方来源 · 5 项待核查', { exact: true }).click();
   await expect(page.getByText('当前服务未启用自动同步。')).toBeVisible();
-  await page.screenshot({ path: 'test-results/calendar-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('calendar-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 393, height: 852 });
   await expect(page.getByRole('button', { name: /测试宏观发布/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -83,7 +86,7 @@ test('日历：补录时刻、月份切换、日期选择、窄屏议程', async
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  await page.screenshot({ path: 'test-results/calendar-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('calendar-mobile.png'), fullPage: true });
   await page.getByRole('button', { name: /测试宏观发布/ }).click();
   await expect(page.getByRole('heading', { name: '事件详情' })).toBeFocused();
 });
@@ -119,7 +122,7 @@ test('来源失败和日历加载失败提供可恢复状态', async ({ page }) 
   await expect(page.getByText('官方来源返回 HTTP 403')).toBeVisible();
 });
 
-test('官方快照：主源未恢复、核对时间、原文下载及窄屏键盘访问', async ({ page }) => {
+test('官方快照：主源未恢复、核对时间、原文下载及窄屏键盘访问', async ({ page }, testInfo) => {
   // The official fixture is November 2026; month navigation must not depend on today's date.
   await page.clock.setFixedTime(new Date('2026-10-31T04:00:00Z'));
   await login(page);
@@ -145,7 +148,10 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
       .update(await original.body())
       .digest('hex'),
   ).toBe(source.snapshots[0].sha256);
-  await page.screenshot({ path: 'test-results/calendar-snapshot-desktop.png', fullPage: true });
+  await page.screenshot({
+    path: testInfo.outputPath('calendar-snapshot-desktop.png'),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 393, height: 852 });
   await page.getByRole('button', { name: '下个月' }).click();
   await expect(page.getByRole('heading', { name: '2026 年 11 月', exact: true })).toBeVisible();
@@ -159,12 +165,15 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
   await expect(page.getByText(/核对 2026\/10\/30/)).toBeVisible();
   await expect(page.getByText('此后改期尚未自动核对，请以官方最新公告为准。')).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/calendar-snapshot-mobile.png', fullPage: true });
+  await page.screenshot({
+    path: testInfo.outputPath('calendar-snapshot-mobile.png'),
+    fullPage: true,
+  });
   await page.getByRole('button', { name: '日历', exact: true }).click();
   await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeFocused();
 });
 
-test('补充来源：单独标记、来源链接和 BLS 故障同时保留', async ({ page }) => {
+test('补充来源：单独标记、来源链接和 BLS 故障同时保留', async ({ page }, testInfo) => {
   await page.clock.setFixedTime(new Date('2026-10-31T04:00:00Z'));
   const event = {
     id: 'supplement',
@@ -231,11 +240,17 @@ test('补充来源：单独标记、来源链接和 BLS 故障同时保留', asy
     'href',
     event.url,
   );
-  await page.screenshot({ path: 'test-results/calendar-supplement-desktop.png', fullPage: true });
+  await page.screenshot({
+    path: testInfo.outputPath('calendar-supplement-desktop.png'),
+    fullPage: true,
+  });
   await page.setViewportSize({ width: 393, height: 852 });
   const link = page.getByRole('link', { name: '查看 BLS 指标页面 ↗' });
   await link.focus();
   await expect(link).toBeFocused();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/calendar-supplement-mobile.png', fullPage: true });
+  await page.screenshot({
+    path: testInfo.outputPath('calendar-supplement-mobile.png'),
+    fullPage: true,
+  });
 });

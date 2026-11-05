@@ -175,7 +175,7 @@ async function login(page: Page, hash = 'ai') {
   await page.getByRole('button', { name: '进入工作台' }).click();
 }
 
-test('AI：开关、预算、错误和刷新不覆盖未保存设置，桌面与窄屏', async ({ page }) => {
+test('AI：开关、预算、错误和刷新不覆盖未保存设置，桌面与窄屏', async ({ page }, testInfo) => {
   const { state } = await fixtures(page);
   await page.clock.install();
   await login(page);
@@ -196,7 +196,7 @@ test('AI：开关、预算、错误和刷新不覆盖未保存设置，桌面与
   await page.getByRole('button', { name: '保存解读设置' }).click();
   await expect(page.getByRole('status')).toContainText('解读设置已保存');
   expect(state.info.settings).toEqual({ enabled: true, automatic: true });
-  await page.screenshot({ path: 'test-results/ai-settings-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('ai-settings-desktop.png'), fullPage: true });
   await page.reload();
   await expect(enabled).toBeChecked();
   await page.setViewportSize({ width: 393, height: 852 });
@@ -205,7 +205,7 @@ test('AI：开关、预算、错误和刷新不覆盖未保存设置，桌面与
   await expect(page.getByRole('status')).toContainText('解读设置已保存');
   expect(state.info.settings.enabled).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/ai-settings-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('ai-settings-mobile.png'), fullPage: true });
   state.info.configured = false;
   state.failRead = true;
   await page.getByRole('button', { name: '刷新用量' }).click();
@@ -216,7 +216,7 @@ test('AI：开关、预算、错误和刷新不覆盖未保存设置，桌面与
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
-test('AI：手动排队、引用快照、缺失数值、修订和有意重试', async ({ page }) => {
+test('AI：手动排队、引用快照、缺失数值、修订和有意重试', async ({ page }, testInfo) => {
   const { state, completed, item } = await fixtures(page);
   state.info.settings.enabled = true;
   await page.clock.install();
@@ -242,7 +242,7 @@ test('AI：手动排队、引用快照、缺失数值、修订和有意重试', 
   await expect(page.locator('.ai-snapshots img')).toHaveCount(0);
   await page.getByText('调用与费用记录', { exact: true }).click();
   await expect(page.getByText('用量估算 ¥0.0010')).toBeVisible();
-  await page.screenshot({ path: 'test-results/ai-result-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('ai-result-desktop.png'), fullPage: true });
   state.job = { ...completed, stale: true };
   await page.getByRole('button', { name: '刷新解读' }).click();
   await expect(page.getByText(/来源已修订。这份解读基于旧版本/)).toBeVisible();
@@ -265,7 +265,7 @@ test('AI：手动排队、引用快照、缺失数值、修订和有意重试', 
   await page.getByRole('button', { name: '刷新解读' }).click();
   await page.setViewportSize({ width: 393, height: 852 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-  await page.screenshot({ path: 'test-results/ai-result-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('ai-result-mobile.png'), fullPage: true });
   state.info.recent = [
     {
       id: completed.id,

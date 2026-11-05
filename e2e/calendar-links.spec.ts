@@ -147,7 +147,7 @@ async function setup(page: Page) {
   return state;
 }
 
-test('日程关联：核对、双向详情、筛选保留、解除与窄屏键盘', async ({ page }) => {
+test('日程关联：核对、双向详情、筛选保留、解除与窄屏键盘', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 });
   const state = await setup(page);
   const panel = page.getByRole('region', { name: '关联日程', exact: true });
@@ -172,7 +172,7 @@ test('日程关联：核对、双向详情、筛选保留、解除与窄屏键�
   await expect(panel.getByRole('heading', { name: '关联日程', exact: true })).toBeFocused();
   await panel.getByText(/确认依据 ·/).click();
   await expect(panel.getByText('测试日程依据：11 月 5 日发布 CPI。')).toBeVisible();
-  await panel.screenshot({ path: 'test-results/calendar-links-desktop.png' });
+  await panel.screenshot({ path: testInfo.outputPath('calendar-links-desktop.png') });
   await panel.getByRole('link', { name: state.event.title }).click();
   await expect(page.getByRole('heading', { name: '事件详情', exact: true })).toBeFocused();
   await page
@@ -190,7 +190,7 @@ test('日程关联：核对、双向详情、筛选保留、解除与窄屏键�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
-  await panel.screenshot({ path: 'test-results/calendar-links-mobile.png' });
+  await panel.screenshot({ path: testInfo.outputPath('calendar-links-mobile.png') });
   await panel.getByRole('button', { name: '取消核对' }).click();
   await panel.getByRole('button', { name: '解除关联', exact: true }).click();
   await panel.getByRole('button', { name: '保留关联' }).click();

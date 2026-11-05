@@ -1,0 +1,9 @@
+# Resolve the current worktree at launch, including sessions opened in subdirectories.
+[mcp_servers.basic-memory]
+command = "node"
+args = [
+  "-e",
+  """import(require('node:url').pathToFileURL(require('node:child_process').execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8'}).trim()+'/scripts/knowledge.mjs')).then(m=>m.main(['mcp'])).catch(e=>{console.error(e.message);process.exitCode=1})""",
+]
+startup_timeout_sec = 90
+tool_timeout_sec = 120

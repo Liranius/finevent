@@ -28,6 +28,7 @@ export default withVueTs(
       '*.{ts,js,mjs}',
       'config/**/*.ts',
       'scripts/**/*.mjs',
+      'tests/**/*.ts',
       'apps/web/*.config.ts',
       'apps/web/config/**/*.ts',
       'apps/web/scripts/**/*.mjs',
@@ -60,7 +61,11 @@ export default withVueTs(
   // 为前端单元测试启用 Vitest 专用规则。
   {
     ...pluginVitest.configs.recommended,
-    files: ['apps/web/src/**/__tests__/**/*.ts', 'apps/web/tests/**/*.test.ts'],
+    files: [
+      'apps/web/src/**/__tests__/**/*.ts',
+      'apps/web/tests/**/*.test.ts',
+      'tests/**/*.test.ts',
+    ],
   },
 
   // 单元测试使用 jsdom：为测试及其辅助 TS 文件声明 Node 和浏览器全局变量，覆盖 tests 下非 .test.ts 文件。

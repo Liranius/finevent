@@ -1,0 +1,28 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('node:url').pathToFileURL(require('node:child_process').execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8'}).trim()+'/scripts/knowledge.mjs')).then(m=>m.main(['hook','session-start'])).catch(e=>{console.error(e.message);process.exitCode=1})\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "manual|auto",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node -e \"import(require('node:url').pathToFileURL(require('node:child_process').execFileSync('git',['rev-parse','--show-toplevel'],{encoding:'utf8'}).trim()+'/scripts/knowledge.mjs')).then(m=>m.main(['hook','pre-compact'])).catch(e=>{console.error(e.message);process.exitCode=1})\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}

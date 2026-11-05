@@ -2,8 +2,6 @@ import { createECDH, randomUUID } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
 
-const origin = 'http://127.0.0.1:4173';
-const headers = { Origin: origin };
 async function login(page: Page) {
   await page.goto('./');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
@@ -13,8 +11,8 @@ async function login(page: Page) {
 async function seed(page: Page) {
   const ec = createECDH('prime256v1');
   ec.generateKeys();
-  const device = await page.request.post(`${origin}/finevent/api/v1/push/subscriptions`, {
-    headers,
+  const device = await page.request.post('api/v1/push/subscriptions', {
+    headers: { Origin: new URL(page.url()).origin },
     data: {
       label: '本地提醒验收设备',
       subscription: {
@@ -28,8 +26,8 @@ async function seed(page: Page) {
   });
   expect(device.status()).toBe(200);
   const start = new Date(Date.now() + 3 * 86400000).toISOString().replace('.000', '');
-  const event = await page.request.post(`${origin}/finevent/api/v1/calendar`, {
-    headers,
+  const event = await page.request.post('api/v1/calendar', {
+    headers: { Origin: new URL(page.url()).origin },
     data: {
       title: '自动提醒验收事件',
       start,
@@ -50,17 +48,17 @@ async function seed(page: Page) {
 }
 
 test.afterEach(async ({ page }) => {
-  const result = await page.request.get(`${origin}/finevent/api/v1/reminders`);
+  const result = await page.request.get('api/v1/reminders');
   if (result.ok()) {
     const data = await result.json();
-    await page.request.put(`${origin}/finevent/api/v1/reminders/settings`, {
-      headers,
+    await page.request.put('api/v1/reminders/settings', {
+      headers: { Origin: new URL(page.url()).origin },
       data: { ...data.settings, enabled: false },
     });
   }
 });
 
-test('日历提醒：单独关注、设置保存、重载、桌面与窄屏、暂停', async ({ page }) => {
+test('日历提醒：单独关注、设置保存、重载、桌面与窄屏、暂停', async ({ page }, testInfo) => {
   await login(page);
   const { device, event } = await seed(page);
   await page.goto(`./#event=${event.id}`);
@@ -77,7 +75,7 @@ test('日历提醒：单独关注、设置保存、重载、桌面与窄屏、�
   await page.getByRole('button', { name: '保存提醒设置' }).click();
   await expect(page.getByRole('status')).toContainText('自动提醒已开启');
   await expect(page.locator('.reminder-agenda .reminder-event-link')).toHaveCount(2);
-  await page.screenshot({ path: 'test-results/reminders-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('reminders-desktop.png'), fullPage: true });
   await page.reload();
   await page.getByRole('button', { name: '提醒设置', exact: true }).click();
   await expect(page.getByLabel('开启日历自动提醒')).toBeChecked();
@@ -90,7 +88,7 @@ test('日历提醒：单独关注、设置保存、重载、桌面与窄屏、�
   await page.getByLabel('同时提醒基金开放最后一天').focus();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: '保存提醒设置' })).toBeFocused();
-  await page.screenshot({ path: 'test-results/reminders-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('reminders-mobile.png'), fullPage: true });
   await page.getByLabel('开启日历自动提醒').uncheck();
   await page.getByRole('button', { name: '保存提醒设置' }).click();
   await expect(page.getByRole('status')).toContainText('自动提醒已暂停');
@@ -103,12 +101,12 @@ test('日历提醒：单独关注、设置保存、重载、桌面与窄屏、�
 test('改期和取消会撤销旧计划，通知链接定位事件详情', async ({ page }) => {
   await login(page);
   const { device, event } = await seed(page);
-  const config = await page.request.get(`${origin}/finevent/api/v1/reminders`);
+  const config = await page.request.get('api/v1/reminders');
   const { settings } = await config.json();
   expect(
     (
-      await page.request.put(`${origin}/finevent/api/v1/reminders/settings`, {
-        headers,
+      await page.request.put('api/v1/reminders/settings', {
+        headers: { Origin: new URL(page.url()).origin },
         data: { ...settings, enabled: true, devices: [device.id], kinds: [], fund_codes: [] },
       })
     ).ok(),
@@ -131,7 +129,7 @@ test('改期和取消会撤销旧计划，通知链接定位事件详情', async
   await expect
     .poll(
       async () => {
-        const r = await page.request.get(`${origin}/finevent/api/v1/reminders`);
+        const r = await page.request.get('api/v1/reminders');
         const d = await r.json();
         return d.history.filter(
           (x: { event_id: string; status: string }) =>
@@ -148,7 +146,7 @@ test('改期和取消会撤销旧计划，通知链接定位事件详情', async
   await expect
     .poll(
       async () => {
-        const r = await page.request.get(`${origin}/finevent/api/v1/reminders`);
+        const r = await page.request.get('api/v1/reminders');
         const d = await r.json();
         return d.upcoming.filter((x: { event_id: string }) => x.event_id === event.id).length;
       },

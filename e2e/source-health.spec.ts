@@ -104,7 +104,7 @@ async function loginSources(page: Page) {
   await expect(page.getByRole('heading', { name: 'TrendRadar 来源健康' })).toBeVisible();
 }
 
-test('来源健康：状态分层、恢复历史、筛选分页、键盘与窄屏', async ({ page }) => {
+test('来源健康：状态分层、恢复历史、筛选分页、键盘与窄屏', async ({ page }, testInfo) => {
   await page.clock.install();
   const { state } = await sourceFixtures(page);
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -138,7 +138,7 @@ test('来源健康：状态分层、恢复历史、筛选分页、键盘与窄�
   await panel.getByRole('button', { name: '加载更早故障' }).click();
   await expect(panel.locator('.source-failure-list li')).toHaveCount(2);
   await expect(panel.getByText('上游已修订或移除此轮状态', { exact: false })).toBeVisible();
-  await page.screenshot({ path: 'test-results/source-health-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('source-health-desktop.png'), fullPage: true });
   await filter.focus();
   const previous = state.requests;
   await page.clock.runFor(31000);
@@ -152,7 +152,7 @@ test('来源健康：状态分层、恢复历史、筛选分页、键盘与窄�
   expect(await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)).toBe(
     false,
   );
-  await page.screenshot({ path: 'test-results/source-health-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('source-health-mobile.png'), fullPage: true });
   state.emptyHistory = true;
   await filter.selectOption('v2ex');
   await panel.getByRole('button', { name: '查询故障记录' }).click();
@@ -167,7 +167,7 @@ test('来源健康：状态分层、恢复历史、筛选分页、键盘与窄�
   await expect(panel.getByRole('alert')).toHaveCount(0);
 });
 
-test('来源健康：加载失败重试、后台保留错误、缺数据与新闻入口', async ({ page }) => {
+test('来源健康：加载失败重试、后台保留错误、缺数据与新闻入口', async ({ page }, testInfo) => {
   await page.clock.install();
   const { health, state } = await sourceFixtures(page);
   state.fail = true;
@@ -201,5 +201,5 @@ test('来源健康：加载失败重试、后台保留错误、缺数据与新�
   await page.getByText('采集通道状态', { exact: true }).click();
   await expect(page.getByRole('heading', { name: 'TrendRadar 来源健康' })).toBeVisible();
   await expect(page.getByText('数据库导入成功不代表新闻源正常', { exact: false })).toBeVisible();
-  await page.screenshot({ path: 'test-results/source-health-empty.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('source-health-empty.png'), fullPage: true });
 });

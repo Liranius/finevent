@@ -1,37 +1,154 @@
 name: CI
+
 on:
-  push:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [master]
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  verify:
+  checks:
+    name: Checks
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      verified: ${{ steps.verify.outputs.verified }}
+    env:
+      CI: 'true'
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Node
+        id: node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: .node-version
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-go@v5
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        id: pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          cache: true
+
+      - name: Setup Go
+        id: go
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version-file: apps/server/go.mod
           cache-dependency-path: apps/server/go.sum
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm ci:format
-      - run: pnpm ci:lint
-      - run: pnpm test:unit
-      - run: pnpm test:go
-      - run: pnpm vet:go
-      - run: |
+
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Check PR commit messages
+        id: commits
+        if: ${{ github.event_name == 'pull_request' }}
+        shell: bash
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          commits=$(git rev-list --reverse --no-merges "$BASE_SHA..$HEAD_SHA")
+          test -n "$commits"
+          while IFS= read -r commit; do
+            git show --no-patch --format=%B "$commit" | pnpm exec commitlint --verbose
+          done <<< "$commits"
+
+      - name: Check formatting
+        id: format
+        run: pnpm run ci:format
+
+      - name: Lint
+        id: lint
+        run: pnpm run ci:lint
+
+      - name: Unit tests
+        id: unit
+        run: pnpm run test:unit
+
+      - name: Go tests
+        id: go-test
+        run: pnpm test:go
+
+      - name: Go vet
+        id: go-vet
+        run: pnpm vet:go
+
+      - name: Deployment tests
+        id: deployment
+        run: |
           python3 -m unittest discover -s deploy -p 'test_*.py'
           pwsh -NoProfile -NonInteractive -File scripts/test-deployment-config.ps1
-      - run: pnpm exec playwright install --with-deps chromium
-      - run: pnpm test:e2e
-      - uses: actions/upload-artifact@v4
-        if: failure()
+
+      - name: Install Chromium
+        id: chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Type check, build and browser smoke test
+        id: e2e
+        run: pnpm run test:e2e --global-timeout=300000
+
+      - name: Upload browser failure report
+        if: ${{ failure() && steps.e2e.outcome == 'failure' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: browser-test-results
+          name: browser-failure-report
           path: |
             playwright-report/
             test-results/
+          if-no-files-found: ignore
           retention-days: 7
+
+      - name: Verify required steps
+        id: verify
+        if: ${{ always() }}
+        shell: bash
+        env:
+          STEP_RESULTS: ${{ toJSON(steps) }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { appendFileSync } from 'node:fs';
+
+          const steps = JSON.parse(process.env.STEP_RESULTS);
+          const required = ['checkout', 'node', 'pnpm', 'go', 'install', 'format', 'lint', 'unit', 'go-test', 'go-vet', 'deployment', 'chromium', 'e2e'];
+          if (process.env.GITHUB_EVENT_NAME === 'pull_request') required.push('commits');
+          const failed = required.filter((id) => steps[id]?.outcome !== 'success');
+          if (failed.length) throw new Error(`Required steps did not succeed: ${failed.join(', ')}`);
+
+          appendFileSync(process.env.GITHUB_OUTPUT, 'verified=true\n');
+          NODE
+
+  quality:
+    name: ${{ github.event_name == 'pull_request' && 'Quality' || 'CI result' }}
+    needs: checks
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require successful checks
+        shell: bash
+        env:
+          CHECKS_RESULT: ${{ needs.checks.result }}
+          STEPS_VERIFIED: ${{ needs.checks.outputs.verified }}
+        run: |
+          test "$CHECKS_RESULT" = success
+          test "$STEPS_VERIFIED" = true
+
+      - name: Reject cancelled run
+        if: ${{ cancelled() }}
+        run: exit 1

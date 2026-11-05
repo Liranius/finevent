@@ -128,7 +128,7 @@ async function loginNews(page: Page, hash = 'news') {
   await expect(page.getByRole('heading', { name: '新闻事件流', exact: true })).toBeVisible();
 }
 
-test('新闻：筛选、详情、跨源证据、修订、键盘与窄屏', async ({ page }) => {
+test('新闻：筛选、详情、跨源证据、修订、键盘与窄屏', async ({ page }, testInfo) => {
   const { state, item, other } = await newsFixtures(page);
   await page.setViewportSize({ width: 1280, height: 900 });
   await loginNews(page);
@@ -139,7 +139,7 @@ test('新闻：筛选、详情、跨源证据、修订、键盘与窄屏', async
   await expect.poll(() => state.queries.at(-1)?.get('category')).toBe('monetary');
   expect(state.queries.at(-1)?.get('industry')).toBe('finance');
   expect(state.queries.at(-1)?.get('order')).toBe('published');
-  await page.screenshot({ path: 'test-results/news-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('news-desktop.png'), fullPage: true });
   const title = page.getByRole('button', { name: item.title, exact: true });
   await title.focus();
   await page.keyboard.press('Enter');
@@ -156,21 +156,21 @@ test('新闻：筛选、详情、跨源证据、修订、键盘与窄屏', async
   await expect(
     page.getByRole('heading', { name: '第 1 版 · 测试报道旧标题', exact: true }),
   ).toBeVisible();
-  await page.screenshot({ path: 'test-results/news-detail-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('news-detail-desktop.png'), fullPage: true });
   await page.setViewportSize({ width: 393, height: 852 });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button', { name: other.title, exact: true }).click();
   await expect(page.getByRole('heading', { name: other.title, exact: true })).toBeFocused();
   await expect(page.getByRole('link', { name: '查看新闻原文 ↗' })).toHaveCount(0);
   await expect(page.getByText('未知 · 旧数据未记录', { exact: true })).toBeVisible();
-  await page.screenshot({ path: 'test-results/news-mobile-detail.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('news-mobile-detail.png'), fullPage: true });
   await page.getByRole('button', { name: '← 返回新闻列表' }).click();
   await expect(page.getByRole('heading', { name: '新闻事件流', exact: true })).toBeFocused();
   await expect(page.getByRole('combobox', { name: '类别', exact: true })).toHaveValue('monetary');
   await page.getByText('采集通道状态', { exact: true }).click();
   await expect(page.getByText('测试：上游暂时不可用', { exact: true })).toBeVisible();
   await expect(page.getByText(/后续成功不代表该缺口已经补齐/)).toBeVisible();
-  await page.screenshot({ path: 'test-results/news-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('news-mobile.png'), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.getByRole('button', { name: '财经日历', exact: true }).click();
   await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeVisible();

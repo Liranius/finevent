@@ -14,6 +14,12 @@
 - 文档只写必要信息，避免重复和非必要的防御性描述；目录、命令或协作约定变化时同步相关说明。
 - 本次修改有意保留临时方案、推迟处理已知工程问题，或引入临时例外时，及时使用 `TODO:` 就近记录原因、影响和解除条件；同一问题涉及多处时保留一份主要记录，其他位置引用它。未知信息标为待确认。
 
+## 项目知识
+
+- Basic Memory 的安装、诊断和目录规则见 [项目知识接入](docs/project-knowledge.md)。使用项目 MCP；CLI 操作通过 `pnpm knowledge:cli`，不要直接使用全局 `bm` 或复制其他 worktree 的配置与数据库。
+- 实质开发、修复和工程约定调整使用项目内的 [project-knowledge](.agents/skills/project-knowledge/SKILL.md)：开始时按需检索，收尾时检查变更关联知识并按需维护；只读问答只检索和核对。
+- 沿用仓库中的官方 `bm-*` 技能按需收录、读取和恢复知识。以当前代码、配置和已确认要求为准；既有 README、AGENTS.md 和 DESIGN.md 保持各自的维护入口，笔记引用来源。
+
 ## UI 工作
 
 - 产品界面的设计、实现与审查使用仓库内的 [interface-design](.agents/skills/interface-design/SKILL.md)，先读取 [DESIGN.md](DESIGN.md) 及相关实现；营销页面等超出该 skill 范围的任务另行选择。项目需求与已确认设计约束优先于通用风格建议，实现沿用 Vue 和现有样式组织方式。

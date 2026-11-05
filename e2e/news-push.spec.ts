@@ -2,7 +2,6 @@ import { createECDH, randomUUID } from 'node:crypto';
 
 import { expect, test, type Page } from '@playwright/test';
 
-const headers = { Origin: 'http://127.0.0.1:4173' };
 const endpoint = '/finevent/api/v1/news-push';
 async function setup(page: Page) {
   await page.goto('./');
@@ -12,7 +11,7 @@ async function setup(page: Page) {
   const ec = createECDH('prime256v1');
   ec.generateKeys();
   const response = await page.request.post('/finevent/api/v1/push/subscriptions', {
-    headers,
+    headers: { Origin: new URL(page.url()).origin },
     data: {
       label: '新闻验收设备',
       subscription: {
@@ -26,7 +25,7 @@ async function setup(page: Page) {
   });
   expect(response.ok()).toBe(true);
   await page.request.put(`${endpoint}/settings`, {
-    headers,
+    headers: { Origin: new URL(page.url()).origin },
     data: { enabled: false, devices: [], categories: [], industries: [] },
   });
   await page.getByRole('button', { name: '新闻事件流', exact: true }).click();
@@ -37,12 +36,12 @@ async function setup(page: Page) {
 
 test.afterEach(async ({ page }) => {
   await page.request.put(`${endpoint}/settings`, {
-    headers,
+    headers: { Origin: new URL(page.url()).origin },
     data: { enabled: false, devices: [], categories: [], industries: [] },
   });
 });
 
-test('新闻关注：验证、保存、刷新保留草稿、键盘、窄屏与暂停', async ({ page }) => {
+test('新闻关注：验证、保存、刷新保留草稿、键盘、窄屏与暂停', async ({ page }, testInfo) => {
   const device = await setup(page);
   await expect(page.getByText('尚无新闻通知。', { exact: false })).toBeVisible();
   await page.getByLabel('开启新闻推送', { exact: true }).check();
@@ -59,7 +58,7 @@ test('新闻关注：验证、保存、刷新保留草稿、键盘、窄屏与�
   await expect(page.getByRole('complementary', { name: '新闻推送规则与状态' })).toContainText(
     '已保存 1 个类别、1 个行业',
   );
-  await page.screenshot({ path: 'test-results/news-push-desktop.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('news-push-desktop.png'), fullPage: true });
   await page.reload();
   await expect(page.getByLabel('货币与流动性', { exact: true })).toBeChecked();
   await expect(page.getByLabel('金融', { exact: true })).toBeChecked();
@@ -70,7 +69,7 @@ test('新闻关注：验证、保存、刷新保留草稿、键盘、窄屏与�
   await expect(page.getByLabel('金属与材料', { exact: true })).toBeChecked();
   await page.keyboard.press('Tab');
   await expect(page.getByRole('button', { name: '保存新闻推送设置' })).toBeFocused();
-  await page.screenshot({ path: 'test-results/news-push-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('news-push-mobile.png'), fullPage: true });
   await page.getByLabel('开启新闻推送', { exact: true }).uncheck();
   await page.getByRole('button', { name: '保存新闻推送设置' }).click();
   await expect(page.getByRole('status')).toContainText('新闻推送已暂停');

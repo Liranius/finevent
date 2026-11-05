@@ -8,10 +8,10 @@
     "server": "go -C apps/server run ./cmd/finevent -data ../../var -web ../web/dist",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "pnpm --filter @finevent/web preview",
-    "test:watch": "pnpm --filter @finevent/web test:watch",
-    "test:unit": "pnpm --filter @finevent/web test:unit",
-    "test:e2e": "playwright test --project=chromium",
-    "test:e2e:all": "playwright test",
+    "test:watch": "vitest",
+    "test:unit": "vitest run",
+    "test:e2e": "pnpm build && playwright test --project=chromium",
+    "test:e2e:all": "pnpm build && playwright test",
     "build-only": "pnpm --filter @finevent/web build-only",
     "type-check": "pnpm --filter @finevent/web type-check && tsc --build",
     "lint": "run-s \"lint:*\"",
@@ -23,7 +23,12 @@
     "ci:format": "oxfmt --check",
     "ci:lint": "oxlint . && eslint . && stylelint \"**/*.{css,vue}\"",
     "test:go": "go -C apps/server test ./...",
-    "vet:go": "go -C apps/server vet ./..."
+    "vet:go": "go -C apps/server vet ./...",
+    "knowledge:setup": "node scripts/knowledge.mjs setup",
+    "knowledge:doctor": "node scripts/knowledge.mjs doctor",
+    "knowledge:cli": "node scripts/knowledge.mjs cli",
+    "knowledge:check": "node scripts/knowledge-review.mjs check",
+    "knowledge:find": "node scripts/knowledge-review.mjs find"
   },
   "devDependencies": {
     "@commitlint/cli": "21.2.2",
@@ -41,6 +46,7 @@
     "eslint-plugin-vue": "10.11.0",
     "globals": "17.12.0",
     "jiti": "2.7.0",
+    "js-yaml": "4.3.2",
     "lefthook": "2.1.14",
     "npm-run-all2": "9.0.3",
     "oxfmt": "0.67.0",
@@ -50,6 +56,7 @@
     "stylelint-config-recommended-vue": "2.0.0",
     "stylelint-config-standard": "40.0.0",
     "typescript": "6.0.3",
+    "vitest": "4.1.11",
     "vue-eslint-parser": "10.4.1"
   },
   "engines": {

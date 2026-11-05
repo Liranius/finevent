@@ -1,7 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('通知连接显示进度与超时，后台刷新保留错误，迟到成功不自动登记', async ({ page, context }) => {
-  await context.grantPermissions(['notifications']);
+test('通知连接显示进度与超时，后台刷新保留错误，迟到成功不自动登记', async ({ page }) => {
   await page.goto('./');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
@@ -9,6 +8,11 @@ test('通知连接显示进度与超时，后台刷新保留错误，迟到成�
   await page.getByLabel('设备名称', { exact: true }).fill('连接超时验收设备');
   await page.clock.install();
   await page.evaluate(() => {
+    // This test isolates subscription timeout handling, not native OS permission prompts.
+    Object.defineProperty(Notification, 'requestPermission', {
+      configurable: true,
+      value: () => Promise.resolve('granted'),
+    });
     let finish!: (value: null) => void;
     const operation = new Promise<null>((resolve) => {
       finish = resolve;

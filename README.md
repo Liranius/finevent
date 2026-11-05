@@ -12,6 +12,8 @@
 
 ## 初始化
 
+自有代码采用 [MIT 许可证](LICENSE)；收录的第三方技能和 schema 遵循各自许可证，来源与范围见 [第三方材料说明](THIRD_PARTY_NOTICES.md)。
+
 前端位于 `apps/web/`，由 pnpm workspace 管理；后端位于 `apps/server/`，保留独立 Go module。`e2e/` 验证前后端集成，`deploy/` 保存部署工具及测试，`scripts/` 提供仓库级构建与发布入口。公共检查配置和锁文件位于根目录。
 
 以下命令从仓库根目录执行。Node 版本以 [.node-version](.node-version) 为准；pnpm 版本见 [package.json](package.json)，Go 版本见 [go.mod](apps/server/go.mod)。使用现有锁文件：
@@ -19,6 +21,7 @@
 ```powershell
 fnm use
 pnpm install --frozen-lockfile
+pnpm hooks:install
 go -C apps/server mod download
 pnpm exec playwright install chromium
 ```
@@ -38,6 +41,8 @@ pnpm server
 需要 Vite 热更新时，先运行 `pnpm server -init -data ../../var/dev -origin http://127.0.0.1:5173` 初始化独立数据目录，再在两个终端运行 `pnpm server -data ../../var/dev` 和 `pnpm dev --host 127.0.0.1`。自定义含密钥的数据目录应放在仓库根目录已忽略的 `var/` 下。开发模式不注册 Service Worker；真实 PWA 测试使用完整构建。
 
 `pnpm build` 检查前端和仓库工具类型，并将前端产物写入 `apps/web/dist/`。仅操作前端子项目时可使用 `pnpm --filter @finevent/web build`、`pnpm --filter @finevent/web test:unit`；Go 命令使用 `go -C apps/server <命令>`。发布包继续包含顶层 Go 程序、`dist/` 和 `deploy/`，供现有服务和安装器使用。
+
+公共环境默认值位于 [apps/web/.env](apps/web/.env)，本地开发、构建与 CI 共用。`VITE_APP_TITLE` 控制浏览器标签页标题；个人覆盖可参考 [示例](apps/web/.env.example) 创建同目录的 `.env.local`，无需复制即可运行。`VITE_*` 会进入客户端产物，只能填写公开配置。Vite 开发服务集成 Vue DevTools；编辑器推荐见 [.vscode/extensions.json](.vscode/extensions.json)。
 
 `-collect` 开启每两分钟快讯采样及每六小时日历同步；`-trendradar <output目录>` 配合 `-collect` 开启每分钟只读导入。普通启动默认不请求外部来源。日历同步单独调度，来源失败保留已有日程，状态在日历下方展示；重启延续上次同步时间。首次服务器同步中 FOMC、BEA 成功，统计局读取响应失败、BLS 返回 403；当前采用已获用户确认的纽约联储补充来源＋统计局官方快照，主源故障继续展示。新方案已安装，来源及长时验收未完成。
 
@@ -67,6 +72,17 @@ git diff --check
 ```
 
 `pnpm test:e2e` 包含类型检查、前端构建和真实 Go 服务的 Chromium 检查，覆盖桌面、窄屏、键盘登录、退出、离线资源、通知记录、日历切换、公告确认及改期取消。模拟的通知记录不属于 Web Push 送达验收；真机步骤见 [验收记录](docs/implementation-status.md)。截图位于 `test-results/`，失败保留 trace。
+
+`pnpm test:unit` 和 `pnpm test:watch` 同时覆盖前端与根目录知识工具测试。三浏览器回归使用：
+
+```powershell
+pnpm exec playwright install chromium firefox webkit
+pnpm test:e2e:all
+```
+
+浏览器测试入口先构建前端，再为 Chromium、Firefox、WebKit 分别启动端口 4173、4174、4175 的独立 Go 服务及数据库，避免跨浏览器残留数据。每个浏览器内的测试共享该服务，保留单 worker 和默认无头运行；需要可见浏览器时传入 `--headed`。接口替身测试阻止 Service Worker，真实离线测试单独启用。截图按测试和浏览器分别保存在 `test-results/` 子目录中。
+
+离线用例另起专用服务，在停止源站后验证真实缓存回退；WebKit 离线模拟器的已知限制及恢复条件见 [测试旁的 TODO](e2e/workspace.spec.ts)。
 
 一次真实来源连通性检查可显式设置 `FINEVENT_LIVE_TEST=1` 后运行 `go -C apps/server test ./internal/probe -run TestLiveWallstreet -v`。该检查不证明两个交易日的时效。
 
@@ -296,4 +312,24 @@ Nginx 重载后，每个 HTTPS 入口最多检查六次，失败间隔一秒；�
 
 ## 提交与合并
 
-提交前完成上述对应检查并审查 diff。`pnpm hooks:install` 安装 Lefthook；钩子会修复并重新暂存匹配文件，需检查副作用。提交信息采用 Conventional Commits。当前仓库尚未建立远端规则，新增 GitHub CI 后仍需由维护者配置分支保护。
+提交前完成上述对应检查并审查 diff。`pnpm hooks:install` 安装 Lefthook；钩子会修复并重新暂存匹配文件，需检查副作用。提交信息采用 Conventional Commits。正式审查前将零散修补整理为可构建的逻辑提交，每个提交包含必要测试；远端接入后采用 PR 和 rebase merge。
+
+## CI
+
+[GitHub Actions](.github/workflows/ci.yml) 在 PR 创建、更新、重开及编辑，`master` 推送和手动触发时执行冻结安装、格式、Lint、前端与知识工具单测、Go 测试及 vet、部署工具回归和 Chromium 冒烟。浏览器入口包含类型检查及构建，不重复构建。PR 还会检查事件 base/head 之间全部非 merge 提交的信息，不检查 PR 标题。
+
+所有必要步骤成功后才通过 `Quality` 汇总检查；失败浏览器报告保留 7 天。Actions 固定提交 SHA，Dependabot 每周检查其更新；过期运行自动取消。Lint warning 沿用基线默认行为，不额外阻断。
+
+TODO: 当前尚未配置 Git 远端。接入托管平台后，验证一次真实 PR 流程，配置 `Quality` 必须通过、分支保护及仅允许 rebase merge；本地配置和验证不能代替平台门禁生效，完成这些检查后删除本项。
+
+## 项目知识
+
+项目接入 Basic Memory，知识 Markdown 随 Git 管理，运行时及数据库保存在本机缓存。安装、worktree 绑定及 hooks 验证见 [项目知识接入](docs/project-knowledge.md)。先安装 uv，再运行 `pnpm knowledge:setup` 和 `pnpm knowledge:doctor`；普通构建与 CI 不依赖知识运行时。
+
+开发时使用项目技能按需检索和维护；`pnpm knowledge:check` 检查受变更影响的笔记，`pnpm knowledge:find 关键词` 提供本地字面检索回退。不要复制其他项目的数据库或绑定配置。
+
+## 维护与验收
+
+每季度复查依赖支持状态、已知风险及配置例外，安全公告或兼容性问题出现时及时评估。依赖按实际需要升级，同步版本声明与锁文件，执行完整 CI 和受影响行为的成功、失败路径验证；记录升级理由与结果。
+
+配置例外在相关注释或 PR 中记录范围、原因、责任人和复查条件；依赖或规则升级时确认保留、收窄或移除。工程配置参考 vue-baseline 的 `b8564eb`，保留当前 workspace、Go/PWA 集成及既有导航和状态实现。
