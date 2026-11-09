@@ -359,6 +359,9 @@ def verify_bundle(bundle):
     for required in ("finevent", "dist/index.html", "deploy/finevent.service", "deploy/install.py"):
         if required not in manifest:
             raise RuntimeError(f"Missing release file: {required}")
+    metadata = bundle / 'release.json'
+    if metadata.exists() and json.loads(metadata.read_text(encoding='utf-8-sig')).get('kind') != 'deployment':
+        raise RuntimeError('Render the generic archive with deployment settings before installation')
 
 
 def install(*, evidence_callback=None):

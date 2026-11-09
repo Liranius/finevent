@@ -142,9 +142,29 @@ Copy-Item .deployment.example.json .deployment.local.json
 # 在本地文件中填写 SSH 目标、网站域名及各部署目录，再构建发布包。
 ```
 
-`.deployment.local.json` 不提交，也可用 `FINEVENT_DEPLOY_CONFIG` 指定仓库外的配置文件。源码中的域名和绝对部署路径为示例值；发布包和临时上传文件按本地配置渲染，保存在已忽略的 `release/`、`.validation/`。`-SshTarget` 可覆盖本次连接目标。配置缺失或非法时，在构建、上传或 SSH 前停止。站点和目录配置变化后必须重新构建发布包；不要公开发布这些带实际环境值的产物。配置与上传参数的本地回归为 `pwsh -NoProfile -NonInteractive -File scripts/test-deployment-config.ps1`，使用模拟命令，不连接服务器。
+`.deployment.local.json` 不提交，也可用 `FINEVENT_DEPLOY_CONFIG` 指定仓库外的配置文件。源码中的域名和绝对部署路径为示例值；本地发布包和临时上传文件按配置渲染，保存在已忽略的 `release/`、`.validation/`。`-SshTarget` 可覆盖本次连接目标。本地默认构建、上传或 SSH 在配置缺失或非法时停止；通用构建不读取私有部署配置。站点和目录配置变化后重新渲染通用包即可，不必重新编译；不要公开发布带实际环境值的产物。配置与上传参数的本地回归为 `pwsh -NoProfile -NonInteractive -File scripts/test-deployment-config.ps1`，使用模拟命令，不连接服务器。
 
-以下为原验证版的安装入口和共用机制：
+### 通用产物与本地发布
+
+`build-release.ps1` 使用当前 Node/pnpm 环境，版本按 `.node-version` 与 `package.json` 准备，无需在脚本中调用 fnm。默认命令继续生成 `release/finevent-<时间>.tar.gz`，现有 `publish-calendar.ps1`、`publish-news.ps1` 等发布入口不变。它先构建通用包，再用本地配置渲染部署文件；Go 程序和前端文件在渲染时保持不变。
+
+只构建可保存到 CI 的通用包，或将下载的通用包转换为本地发布包：
+
+```powershell
+.\scripts\build-release.ps1 -Generic
+python scripts/check-release.py release/generic/finevent-<时间>.tar.gz --kind generic
+.\scripts\render-release.ps1 -Archive release/generic/finevent-<时间>.tar.gz
+# 继续沿用已有发布及前序验收参数：
+.\scripts\publish-calendar.ps1 -Archive release/finevent-<时间>.tar.gz -AfterReview <上一轮完整ID>
+```
+
+通用包位于 `release/generic/`，只含应用文件、部署模板和公开元数据，不含私有部署配置。`release.json` 记录实际检出的提交 SHA、工作区是否有未提交修改及目标平台；PR 的 SHA 是被测试的合并结果。包内 `sha256.json` 覆盖所有文件，包旁 `.sha256` 校验压缩包本身；渲染后记录原通用包摘要并重新计算文件摘要。下载后核对 Actions 运行、提交和包摘要；摘要用于完整性核对，不能代替来源确认。通用包未经渲染不能通过发布校验或安装器检查，旧格式部署包继续兼容。
+
+`render-release.ps1` 可通过 `-ConfigPath` 指定配置、`-OutputDirectory` 指定输出目录，不覆盖已有发布包。`pwsh -NoProfile -NonInteractive -File scripts/test-release.ps1` 使用最近的通用包和虚构配置验证渲染与失败路径，不连接服务器。CI 在同一检出目录完成浏览器测试与构建后使用 `-SkipFrontendBuild` 复用该前端产物；普通本地构建不需要此参数。
+
+TODO: 第二批接入 Actions 手动部署、SSH 密钥认证与服务器报告查询；完成前继续使用本地发布入口，并保留现有备份、回滚和前序验收要求。
+
+### 原验证版安装与共用机制
 
 在项目根目录使用 PowerShell：
 
@@ -318,11 +338,11 @@ Nginx 重载后，每个 HTTPS 入口最多检查六次，失败间隔一秒；�
 
 ## CI
 
-[GitHub Actions](.github/workflows/ci.yml) 在 PR 创建、更新、重开及编辑，`main` 推送和手动触发时执行冻结安装、格式、Lint、前端与知识工具单测、Go 测试及 vet、部署工具回归和 Chromium 冒烟。浏览器入口包含类型检查及构建，不重复构建。PR 还会检查事件 base/head 之间全部非 merge 提交的信息，不检查 PR 标题。
+[GitHub Actions](.github/workflows/ci.yml) 在 PR 创建、更新、重开及编辑，`main` 推送和手动触发时执行冻结安装、格式、Lint、前端与知识工具单测、Go 测试及 vet、部署工具回归和 Chromium 冒烟。浏览器入口包含类型检查及构建，随后复用前端产物编译 Linux amd64 程序、打包并验证本地渲染。PR 还会检查事件 base/head 之间全部非 merge 提交的信息，不检查 PR 标题。
 
-所有必要步骤成功后才通过 `Quality` 汇总检查；失败浏览器报告保留 7 天。Actions 固定提交 SHA，Dependabot 每周检查其更新；过期运行自动取消。Lint warning 沿用基线默认行为，不额外阻断。
+所有必要步骤（包括通用包构建、渲染回归及上传）成功后才通过 PR 的 `Quality` 汇总检查；主分支及手动运行显示 `CI result`。通用包以 `finevent-linux-amd64-<检出SHA>` 命名，作为 Actions artifact 保留 14 天；失败浏览器报告保留 7 天。只上传 `release/generic/` 的压缩包与摘要，本地渲染包和 `.validation/` 不上传。Actions 固定提交 SHA，Dependabot 每周检查其更新；过期运行自动取消。Lint warning 沿用基线默认行为，不额外阻断。
 
-TODO: GitHub 远端已配置。在后续构建方式讨论中统一确认真实 PR 流程、`Quality` 必须通过、分支保护及仅允许 rebase merge 的平台配置与验证；完成平台验证后删除本项。
+`main` 已配置分支保护：通过 PR 合入，要求分支与主分支同步、GitHub Actions 提供的 `Quality` 成功；管理员同样受约束，禁止强推及删除，仓库仅允许 rebase merge。个人仓库不额外要求他人审批。平台配置与真实检查的验收入口为 PR #1；本地检查不能替代 PR 最新提交的远端结果。
 
 ## 项目知识
 

@@ -1,11 +1,20 @@
+param([switch]$Generic, [switch]$SkipFrontendBuild)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'deployment-config.ps1')
-$null = Initialize-FineventDeployment
+. (Join-Path $PSScriptRoot 'release-archive.ps1')
+# Preserve the local entrypoint's early configuration validation.
+if (-not $Generic) { $null = Initialize-FineventDeployment }
 Set-Location -LiteralPath (Split-Path -Parent $PSScriptRoot)
-& fnm exec --using 24.21.0 pnpm build
-if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
+if (-not $SkipFrontendBuild) {
+    & pnpm build
+    if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed' }
+}
+$sourceCommit = & git rev-parse HEAD
+if ($LASTEXITCODE -ne 0) { throw 'Cannot identify source commit' }
+$sourceChanges = & git status --porcelain --untracked-files=normal
+if ($LASTEXITCODE -ne 0) { throw 'Cannot identify source changes' }
 $releaseStamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ')
-$releaseRoot = Join-Path (Get-Location) "release/$releaseStamp"
+$releaseRoot = Join-Path (Get-Location) ('.validation/release-builds/' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $releaseRoot -Force | Out-Null
 $oldGoOS = $env:GOOS
 $oldGoArch = $env:GOARCH
@@ -21,23 +30,16 @@ try {
     $env:GOARCH = $oldGoArch
     $env:CGO_ENABLED = $oldCgo
 }
-Copy-Item -LiteralPath 'apps/web/dist' -Destination $releaseRoot -Recurse
+Copy-Item -LiteralPath 'apps/web/dist' -Destination $releaseRoot -Recurse -Force
 $releaseDeploy = Join-Path $releaseRoot 'deploy'
 New-Item -ItemType Directory -Path $releaseDeploy | Out-Null
 Copy-Item -LiteralPath 'apps/server/internal/calendar/snapshots/nbs-2026.json' -Destination (Join-Path $releaseDeploy 'calendar-snapshot.json')
 foreach ($deployFile in @('install.py','backup.py','calendar_release.py','news_release.py','news_push_release.py','source_health_release.py','calendar_links_release.py','ai_release.py','calendar_review.py','calendar-reviews.json','verification.py','verification_resources.py','memory_recovery.py','memory_diagnostic.py','finevent.service','finevent-backup.service','finevent-backup.timer','finevent.nginx.conf')) {
-    Export-FineventDeploymentFile (Join-Path 'deploy' $deployFile) (Join-Path $releaseDeploy $deployFile)
+    Copy-Item -LiteralPath (Join-Path 'deploy' $deployFile) -Destination (Join-Path $releaseDeploy $deployFile)
 }
-$releaseFiles = Get-ChildItem -LiteralPath $releaseRoot -File -Recurse
-$manifest = @{}
-foreach ($releaseFile in $releaseFiles) {
-    $relative = [IO.Path]::GetRelativePath($releaseRoot, $releaseFile.FullName).Replace([IO.Path]::DirectorySeparatorChar, [char]'/')
-    $manifest[$relative] = (Get-FileHash -LiteralPath $releaseFile.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-}
-$manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releaseRoot 'sha256.json') -Encoding utf8
-$releaseArchive = Join-Path (Get-Location) "release/finevent-$releaseStamp.tar.gz"
-& tar -czf $releaseArchive -C $releaseRoot .
-if ($LASTEXITCODE -ne 0) { throw 'Archive creation failed' }
-& python scripts/check-release.py $releaseArchive
-if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
-Write-Host "Release: $releaseArchive"
+Copy-Item -LiteralPath '.deployment.example.json' -Destination (Join-Path $releaseRoot 'deployment-template.json')
+@{ schema=1; kind='generic'; target='linux/amd64'; source_commit=$sourceCommit.Trim(); source_dirty=[bool]$sourceChanges; created_utc=[DateTime]::UtcNow.ToString('o') } |
+    ConvertTo-Json | Set-Content -LiteralPath (Join-Path $releaseRoot 'release.json') -Encoding utf8
+$releaseArchive = Join-Path (Get-Location) "release/generic/finevent-$releaseStamp.tar.gz"
+New-FineventReleaseArchive -SourceRoot $releaseRoot -Archive $releaseArchive -Kind generic
+if (-not $Generic) { & (Join-Path $PSScriptRoot 'render-release.ps1') -Archive $releaseArchive }

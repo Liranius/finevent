@@ -1,14 +1,15 @@
 # The public deployment sources use the values in .deployment.example.json.
 # Actual addresses and paths are rendered only into ignored local artifacts.
 function Initialize-FineventDeployment {
-    param([string]$SshTarget, [string]$ConfigPath)
+    param([string]$SshTarget, [string]$ConfigPath, [string]$TemplatePath)
     $repoRoot = Split-Path -Parent $PSScriptRoot
     if (-not $ConfigPath) { $ConfigPath = $env:FINEVENT_DEPLOY_CONFIG }
     if (-not $ConfigPath) { $ConfigPath = Join-Path $repoRoot '.deployment.local.json' }
     if (-not (Test-Path -LiteralPath $ConfigPath -PathType Leaf)) {
         throw 'Create .deployment.local.json from .deployment.example.json and fill in the deployment settings.'
     }
-    $template = Get-Content -LiteralPath (Join-Path $repoRoot '.deployment.example.json') -Raw | ConvertFrom-Json -AsHashtable
+    if (-not $TemplatePath) { $TemplatePath = Join-Path $repoRoot '.deployment.example.json' }
+    $template = Get-Content -LiteralPath $TemplatePath -Raw | ConvertFrom-Json -AsHashtable
     $settings = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json -AsHashtable
     foreach ($name in $template.Keys) {
         $value = $settings[$name]

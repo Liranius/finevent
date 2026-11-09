@@ -103,6 +103,27 @@ jobs:
         id: e2e
         run: pnpm run test:e2e --global-timeout=300000
 
+      - name: Build generic release
+        id: release
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -Generic -SkipFrontendBuild
+
+      - name: Verify local rendering and release boundaries
+        id: release-test
+        shell: pwsh
+        run: ./scripts/test-release.ps1
+
+      - name: Upload generic release
+        id: artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: finevent-linux-amd64-${{ github.sha }}
+          path: |
+            release/generic/*.tar.gz
+            release/generic/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload browser failure report
         if: ${{ failure() && steps.e2e.outcome == 'failure' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -125,7 +146,7 @@ jobs:
           import { appendFileSync } from 'node:fs';
 
           const steps = JSON.parse(process.env.STEP_RESULTS);
-          const required = ['checkout', 'node', 'pnpm', 'go', 'install', 'format', 'lint', 'unit', 'go-test', 'go-vet', 'deployment', 'chromium', 'e2e'];
+          const required = ['checkout', 'node', 'pnpm', 'go', 'install', 'format', 'lint', 'unit', 'go-test', 'go-vet', 'deployment', 'chromium', 'e2e', 'release', 'release-test', 'artifact'];
           if (process.env.GITHUB_EVENT_NAME === 'pull_request') required.push('commits');
           const failed = required.filter((id) => steps[id]?.outcome !== 'success');
           if (failed.length) throw new Error(`Required steps did not succeed: ${failed.join(', ')}`);
