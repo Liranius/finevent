@@ -44,6 +44,8 @@ pnpm server
 
 公共环境默认值位于 [apps/web/.env](apps/web/.env)，本地开发、构建与 CI 共用。`VITE_APP_TITLE` 控制浏览器标签页标题；个人覆盖可参考 [示例](apps/web/.env.example) 创建同目录的 `.env.local`，无需复制即可运行。`VITE_*` 会进入客户端产物，只能填写公开配置。Vite 开发服务集成 Vue DevTools；编辑器推荐见 [.vscode/extensions.json](.vscode/extensions.json)。
 
+前端使用 Vue Router 管理工作区与深链接，采用 hash 模式，继续使用现有 `/finevent/` 静态入口；通知的旧地址仍可使用，导航行为见 [设计规范](DESIGN.md#行为)。TODO: Pinia 暂缓引入，当前共享状态仍由父组件与 props/emits 管理；若跨工作区共享和更新明显增多，再评估 store 边界与迁移，避免提前引入正文缓存和额外清理职责。
+
 `-collect` 开启每两分钟快讯采样及每六小时日历同步；`-trendradar <output目录>` 配合 `-collect` 开启每分钟只读导入。普通启动默认不请求外部来源。日历同步单独调度，来源失败保留已有日程，状态在日历下方展示；重启延续上次同步时间。首次服务器同步中 FOMC、BEA 成功，统计局读取响应失败、BLS 返回 403；当前采用已获用户确认的纽约联储补充来源＋统计局官方快照，主源故障继续展示。新方案已安装，来源及长时验收未完成。
 
 10 月 31 日终态报告显示：统计局在下一轮直接同步成功，导入 47 项，FOMC、BEA 再次成功，BLS 仍为 403；六小时十五分钟资源与运行检查通过。新版会保留已有统计局日程，较旧快照不会覆盖它们，来源时效以实际最后成功记录为准。
@@ -312,15 +314,15 @@ Nginx 重载后，每个 HTTPS 入口最多检查六次，失败间隔一秒；�
 
 ## 提交与合并
 
-提交前完成上述对应检查并审查 diff。`pnpm hooks:install` 安装 Lefthook；钩子会修复并重新暂存匹配文件，需检查副作用。提交信息采用 Conventional Commits。正式审查前将零散修补整理为可构建的逻辑提交，每个提交包含必要测试；远端接入后采用 PR 和 rebase merge。
+提交前完成上述对应检查并审查 diff。`pnpm hooks:install` 安装 Lefthook；钩子会修复并重新暂存匹配文件，需检查副作用。提交信息采用 Conventional Commits。正式审查前将零散修补整理为可构建的逻辑提交，每个提交包含必要测试；托管协作计划采用 PR 和 rebase merge，平台配置与验证见下方 CI 待办。
 
 ## CI
 
-[GitHub Actions](.github/workflows/ci.yml) 在 PR 创建、更新、重开及编辑，`master` 推送和手动触发时执行冻结安装、格式、Lint、前端与知识工具单测、Go 测试及 vet、部署工具回归和 Chromium 冒烟。浏览器入口包含类型检查及构建，不重复构建。PR 还会检查事件 base/head 之间全部非 merge 提交的信息，不检查 PR 标题。
+[GitHub Actions](.github/workflows/ci.yml) 在 PR 创建、更新、重开及编辑，`main` 推送和手动触发时执行冻结安装、格式、Lint、前端与知识工具单测、Go 测试及 vet、部署工具回归和 Chromium 冒烟。浏览器入口包含类型检查及构建，不重复构建。PR 还会检查事件 base/head 之间全部非 merge 提交的信息，不检查 PR 标题。
 
 所有必要步骤成功后才通过 `Quality` 汇总检查；失败浏览器报告保留 7 天。Actions 固定提交 SHA，Dependabot 每周检查其更新；过期运行自动取消。Lint warning 沿用基线默认行为，不额外阻断。
 
-TODO: 当前尚未配置 Git 远端。接入托管平台后，验证一次真实 PR 流程，配置 `Quality` 必须通过、分支保护及仅允许 rebase merge；本地配置和验证不能代替平台门禁生效，完成这些检查后删除本项。
+TODO: GitHub 远端已配置。在后续构建方式讨论中统一确认真实 PR 流程、`Quality` 必须通过、分支保护及仅允许 rebase merge 的平台配置与验证；完成平台验证后删除本项。
 
 ## 项目知识
 

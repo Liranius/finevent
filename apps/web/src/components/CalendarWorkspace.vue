@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
 
 import { api, ApiError, formatTime } from '../api';
 import {
@@ -16,7 +17,7 @@ import {
   type EventDetail,
   type FundDraft,
 } from '../calendar';
-import type { CalendarNavigation } from '../workspace-navigation';
+import { returnToList, type CalendarNavigation } from '../workspace-navigation';
 import CalendarLinks from './CalendarLinks.vue';
 import EventEditor from './EventEditor.vue';
 import EventReminder from './EventReminder.vue';
@@ -24,10 +25,22 @@ import ReminderSettings from './ReminderSettings.vue';
 
 const props = defineProps<{ navigation?: CalendarNavigation }>();
 const emit = defineEmits<{ expired: []; devices: []; remember: [state: CalendarNavigation] }>();
+const route = useRoute();
+const router = useRouter();
 const today = beijingDay(new Date());
 const month = ref(props.navigation?.month ?? today.slice(0, 7));
 const selectedDay = ref(props.navigation?.day ?? today);
-const mode = ref<'calendar' | 'fund' | 'manual' | 'detail' | 'reminders'>('calendar');
+const mode = computed(() =>
+  route.name === 'calendar-event'
+    ? 'detail'
+    : route.name === 'fund' || route.name === 'fund-draft'
+      ? 'fund'
+      : route.name === 'calendar-new'
+        ? 'manual'
+        : route.name === 'reminders'
+          ? 'reminders'
+          : 'calendar',
+);
 const layout = ref<'month' | 'agenda'>(
   props.navigation?.layout ??
     (window.matchMedia('(max-width: 680px)').matches ? 'agenda' : 'month'),
@@ -48,7 +61,9 @@ const announcement = ref('');
 const announcementURL = ref('');
 const error = ref('');
 const notice = ref('');
-const busy = ref(false);
+const working = ref(false);
+const routing = ref(false);
+const busy = computed(() => working.value || routing.value);
 const heading = ref<HTMLElement | null>(null);
 const filter = ref(props.navigation?.filter ?? 'all');
 const manual = ref(blankEvent());
@@ -76,8 +91,12 @@ const agenda = computed(() =>
 let timer: ReturnType<typeof setInterval> | undefined;
 let requestID = 0;
 let disposed = false;
+let ready = false;
+let routeRequest = 0;
+let lastEvent = props.navigation?.lastEvent ?? '';
+const routeError = ref(false);
 async function action(work: () => Promise<void>) {
-  busy.value = true;
+  working.value = true;
   error.value = '';
   notice.value = '';
   try {
@@ -86,7 +105,7 @@ async function action(work: () => Promise<void>) {
     error.value = cause instanceof Error ? cause.message : '操作失败，请稍后重试';
     if (cause instanceof ApiError && cause.status === 401) emit('expired');
   } finally {
-    busy.value = false;
+    working.value = false;
   }
 }
 async function refresh() {
@@ -122,53 +141,86 @@ async function focusHeading() {
   await nextTick();
   heading.value?.focus();
 }
-async function openEvent(id: string) {
-  await action(async () => {
-    detail.value = await api<EventDetail>(`calendar/${id}`);
-    editing.value = false;
-    mode.value = 'detail';
-    history.replaceState(null, '', `#event=${id}`);
-    await focusHeading();
-  });
+function openEvent(id: string) {
+  void router.push({ name: 'calendar-event', params: { id } });
 }
-async function navigate(next: 'calendar' | 'fund' | 'manual' | 'reminders') {
-  mode.value = next;
-  editing.value = false;
-  history.replaceState(null, '', window.location.pathname);
-  error.value = '';
+function navigate(next: 'calendar' | 'fund' | 'manual' | 'reminders') {
+  if (next === 'calendar' && mode.value === 'detail') returnToList(router, 'calendar');
+  else void router.push({ name: next === 'manual' ? 'calendar-new' : next });
+}
+async function syncRoute() {
+  if (route.meta.workspace !== 'calendar') return;
+  const request = ++routeRequest;
+  const path = route.fullPath;
+  const name = route.name;
+  const id = String(route.params.id ?? '');
+  routing.value = true;
+  routeError.value = false;
+  if (name !== 'calendar' || data.value) error.value = '';
   notice.value = '';
-  if (next === 'fund')
-    await action(async () => {
-      drafts.value = await api<FundDraft[]>('fund-drafts');
-    });
-  if (next === 'manual') manual.value = blankEvent();
-  await focusHeading();
+  editing.value = false;
+  detail.value = null;
+  draft.value = null;
+  const current = () => !disposed && request === routeRequest && path === route.fullPath;
+  try {
+    if (name === 'calendar-event') {
+      const next = await api<EventDetail>(`calendar/${encodeURIComponent(id)}`);
+      if (!current()) return;
+      detail.value = next;
+      lastEvent = id;
+    } else if (name === 'fund-draft') {
+      const next = await api<FundDraft>(`fund-drafts/${encodeURIComponent(id)}`);
+      if (!current()) return;
+      draft.value = next;
+    } else if (name === 'fund') {
+      const next = await api<FundDraft[]>('fund-drafts');
+      if (!current()) return;
+      drafts.value = next;
+    } else if (name === 'calendar-new') manual.value = blankEvent();
+    await nextTick();
+    if (!current()) return;
+    if (name === 'calendar')
+      (document.getElementById(`calendar-event-${lastEvent}`) ?? heading.value)?.focus();
+    else heading.value?.focus();
+  } catch (cause) {
+    if (!current()) return;
+    routeError.value = true;
+    error.value = cause instanceof Error ? cause.message : '页面暂时无法读取，请重试。';
+    if (cause instanceof ApiError && cause.status === 401) emit('expired');
+    await focusHeading();
+  } finally {
+    if (current()) routing.value = false;
+  }
 }
+watch(
+  () => route.fullPath,
+  () => {
+    if (ready) void syncRoute();
+  },
+);
 async function extract() {
   await action(async () => {
-    draft.value = await api<FundDraft>('fund-drafts', 'POST', {
+    const path = route.fullPath;
+    const next = await api<FundDraft>('fund-drafts', 'POST', {
       text: announcement.value,
       url: announcementURL.value,
     });
-    history.replaceState(null, '', `#draft=${draft.value.id}`);
-    await focusHeading();
+    if (!disposed && path === route.fullPath)
+      await router.push({ name: 'fund-draft', params: { id: next.id } });
   });
 }
-async function loadDraft(id: string) {
-  await action(async () => {
-    draft.value = await api<FundDraft>(`fund-drafts/${id}`);
-    mode.value = 'fund';
-    history.replaceState(null, '', `#draft=${id}`);
-    await focusHeading();
-  });
+function loadDraft(id: string) {
+  void router.push({ name: 'fund-draft', params: { id } });
 }
 async function confirm(event: CalendarEvent) {
   if (!draft.value) return;
   await action(async () => {
+    const path = route.fullPath;
     const saved = await api<CalendarEvent>(`fund-drafts/${draft.value!.id}/confirm`, 'POST', {
       event,
       acknowledged: true,
     });
+    if (disposed || path !== route.fullPath) return;
     draft.value = null;
     announcement.value = '';
     announcementURL.value = '';
@@ -178,11 +230,13 @@ async function confirm(event: CalendarEvent) {
 }
 async function save(event: CalendarEvent) {
   await action(async () => {
+    const path = route.fullPath;
     const saved = await api<CalendarEvent>(
       event.id ? `calendar/${event.id}` : 'calendar',
       event.id ? 'PUT' : 'POST',
       event,
     );
+    if (disposed || path !== route.fullPath) return;
     await afterSave(saved);
     notice.value = '事件已保存，变更可在修订记录中查看。';
   });
@@ -190,33 +244,20 @@ async function save(event: CalendarEvent) {
 async function afterSave(event: CalendarEvent) {
   month.value = eventDays(event)[0].slice(0, 7);
   selectedDay.value = eventDays(event)[0];
-  editing.value = false;
-  detail.value = await api<EventDetail>(`calendar/${event.id}`);
-  mode.value = 'detail';
-  history.replaceState(null, '', `#event=${event.id}`);
+  const target = { name: 'calendar-event', params: { id: event.id } };
+  if (router.resolve(target).fullPath === route.fullPath) await syncRoute();
+  else await router.replace(target);
   await refresh();
-  await focusHeading();
 }
 function resetDraft() {
-  draft.value = null;
-  history.replaceState(null, '', window.location.pathname);
-  void navigate('fund');
-}
-function onHashChange() {
-  const hash = new URLSearchParams(window.location.hash.slice(1));
-  const id = hash.get('event');
-  if (id) void openEvent(id);
+  void router.replace({ name: 'fund' });
 }
 onMounted(async () => {
   await action(refresh);
   if (disposed) return;
-  const hash = new URLSearchParams(window.location.hash.slice(1));
-  const id = hash.get('event');
-  const draftID = hash.get('draft');
-  if (id) await openEvent(id);
-  else if (draftID) await loadDraft(draftID);
+  ready = true;
+  await syncRoute();
   if (disposed) return;
-  window.addEventListener('hashchange', onHashChange);
   timer = setInterval(() => {
     if (!busy.value && document.visibilityState === 'visible')
       void refresh().catch((cause: unknown) => {
@@ -231,9 +272,10 @@ onUnmounted(() => {
     day: selectedDay.value,
     layout: layout.value,
     filter: filter.value,
+    lastEvent,
   });
   disposed = true;
-  window.removeEventListener('hashchange', onHashChange);
+  ++routeRequest;
   clearInterval(timer);
   requestID++;
 });
@@ -276,7 +318,9 @@ onUnmounted(() => {
         </button>
       </div>
     </div>
-    <p v-if="error" class="message error" role="alert">{{ error }}</p>
+    <p v-if="error" class="message error" role="alert">
+      {{ error }} <button v-if="routeError" :disabled="busy" @click="syncRoute">重试页面</button>
+    </p>
     <p v-if="notice" class="message" role="status">{{ notice }}</p>
     <template v-if="mode === 'calendar'">
       <p v-if="snapshotCount" class="message warning" role="status">
@@ -340,7 +384,11 @@ onUnmounted(() => {
           <p v-if="!agenda.length" class="empty">暂无已收录事件。可切换月份或查看下方来源状态。</p>
           <ol v-else class="agenda-list">
             <li v-for="event in agenda" :key="event.id">
-              <button class="agenda-event" @click="openEvent(event.id)">
+              <button
+                :id="`calendar-event-${event.id}`"
+                class="agenda-event"
+                @click="openEvent(event.id)"
+              >
                 <span class="event-meta"
                   >{{ eventOrigin(event) }} · {{ states[event.status]
                   }}<span v-if="event.importance === 3"> · 重要</span></span
@@ -400,7 +448,10 @@ onUnmounted(() => {
       </details>
     </template>
     <template v-else-if="mode === 'fund'">
-      <div v-if="draft" class="entry-layout">
+      <p v-if="route.name === 'fund-draft' && !draft" class="empty" role="status">
+        {{ routing ? '正在读取草稿…' : '草稿读取失败。' }}
+      </p>
+      <div v-else-if="draft" class="entry-layout">
         <section class="primary-panel">
           <span class="step">第二步 / 核对并确认</span>
           <h2>开放窗口草稿</h2>
@@ -549,7 +600,7 @@ onUnmounted(() => {
         :key="detail.event.id"
         :event="detail.event"
         @expired="emit('expired')"
-        @reload="openEvent(detail.event.id)"
+        @reload="syncRoute"
       />
       <details class="source-details">
         <summary>修订记录 · {{ detail.revisions.length }} 版</summary>
@@ -566,6 +617,9 @@ onUnmounted(() => {
         </ol>
       </details>
     </template>
+    <p v-else-if="mode === 'detail'" class="empty" role="status">
+      {{ routing ? '正在读取事件…' : '事件读取失败。' }}
+    </p>
     <footer>
       日程以官方最新公告为准。自动提醒需在提醒设置中开启并选择设备；改期、取消以最新日程为准。
     </footer>

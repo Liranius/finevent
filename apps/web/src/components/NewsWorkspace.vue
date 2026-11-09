@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import { api, ApiError } from '../api';
 import {
@@ -14,7 +15,7 @@ import {
   type NewsMeta,
   type NewsPage,
 } from '../news';
-import type { NewsNavigation } from '../workspace-navigation';
+import { returnToList, type NewsNavigation } from '../workspace-navigation';
 import CalendarLinks from './CalendarLinks.vue';
 import NewsAnalysis from './NewsAnalysis.vue';
 import NewsPushSettings from './NewsPushSettings.vue';
@@ -22,11 +23,13 @@ import SourceHealth from './SourceHealth.vue';
 
 const props = defineProps<{ navigation?: NewsNavigation }>();
 const emit = defineEmits<{ expired: []; devices: []; remember: [state: NewsNavigation] }>();
+const route = useRoute();
+const router = useRouter();
 const meta = ref<NewsMeta | null>(null);
 const feed = ref<NewsPage | null>(null);
 const detail = ref<NewsDetail | null>(null);
-const selected = ref(0);
-const settingsOpen = ref(false);
+const selected = ref(props.navigation?.lastSelected ?? 0);
+const settingsOpen = computed(() => route.name === 'news-push');
 const busy = ref(false);
 const detailBusy = ref(false);
 const error = ref('');
@@ -46,6 +49,8 @@ let applied = new URLSearchParams(props.navigation?.applied);
 let feedRequest = 0,
   detailRequest = 0;
 let disposed = false;
+let ready = false;
+let lastSelected = props.navigation?.lastSelected ?? 0;
 let timer: ReturnType<typeof setInterval> | undefined;
 let checking = false;
 function handleError(cause: unknown) {
@@ -111,7 +116,8 @@ async function loadDetail(id: number) {
     if (disposed || request !== detailRequest) return;
     detail.value = next;
     await nextTick();
-    document.getElementById('news-detail-heading')?.focus();
+    if (!disposed && request === detailRequest)
+      document.getElementById('news-detail-heading')?.focus();
   } catch (cause) {
     if (!disposed && request === detailRequest) error.value = handleError(cause);
   } finally {
@@ -119,42 +125,46 @@ async function loadDetail(id: number) {
   }
 }
 function open(id: number) {
-  window.location.hash = `news=${id}`;
+  void router.push({ name: 'news-detail', params: { id } });
 }
-async function route() {
-  const hash = new URLSearchParams(window.location.hash.slice(1));
-  if (!hash.has('news') && !hash.has('news-push')) return;
-  settingsOpen.value = window.location.hash === '#news-push';
+async function syncRoute() {
+  if (route.meta.workspace !== 'news') return;
+  const path = route.fullPath;
   if (settingsOpen.value) {
     ++detailRequest;
     detailBusy.value = false;
     await nextTick();
-    document.getElementById('news-heading')?.focus();
+    if (!disposed && path === route.fullPath) document.getElementById('news-heading')?.focus();
     return;
   }
-  const raw = new URLSearchParams(window.location.hash.slice(1)).get('news') ?? '';
-  const id = /^[1-9][0-9]*$/.test(raw) ? Number(raw) : 0;
-  const previous = selected.value;
+  const id = route.name === 'news-detail' ? Number(route.params.id) : 0;
+  const previous = lastSelected;
   selected.value = id;
-  if (id) await loadDetail(id);
-  else {
+  if (id) {
+    lastSelected = id;
+    await loadDetail(id);
+  } else {
     ++detailRequest;
     detail.value = null;
     detailBusy.value = false;
     if (previous) error.value = '';
     if (previous && !feed.value && !busy.value) await load();
     await nextTick();
-    (
-      document.getElementById(`news-item-${previous}`) ?? document.getElementById('news-heading')
-    )?.focus();
+    if (!disposed && path === route.fullPath)
+      (
+        document.getElementById(`news-item-${previous}`) ?? document.getElementById('news-heading')
+      )?.focus();
   }
 }
 function back() {
-  window.location.hash = 'news';
+  returnToList(router, 'news');
 }
-function onHashChange() {
-  void route();
-}
+watch(
+  () => route.fullPath,
+  () => {
+    if (ready) void syncRoute();
+  },
+);
 async function refresh() {
   await load();
   if (selected.value) await loadDetail(selected.value);
@@ -194,19 +204,18 @@ onMounted(async () => {
   if (props.navigation) await load();
   else await apply();
   if (disposed) return;
-  await route();
+  ready = true;
+  await syncRoute();
   if (disposed) return;
   timer = setInterval(() => void checkChanges(), 30000);
-  window.addEventListener('hashchange', onHashChange);
   document.addEventListener('visibilitychange', onVisible);
 });
 onUnmounted(() => {
-  emit('remember', { filters: { ...filters }, applied: applied.toString() });
+  emit('remember', { filters: { ...filters }, applied: applied.toString(), lastSelected });
   disposed = true;
   ++feedRequest;
   ++detailRequest;
   clearInterval(timer);
-  window.removeEventListener('hashchange', onHashChange);
   document.removeEventListener('visibilitychange', onVisible);
 });
 </script>
@@ -230,8 +239,10 @@ onUnmounted(() => {
       <button v-if="!settingsOpen" :disabled="busy || detailBusy" @click="refresh">刷新新闻</button>
     </div>
     <nav class="section-nav" aria-label="新闻功能">
-      <a href="#news" :aria-current="!settingsOpen ? 'page' : undefined">报道记录</a>
-      <a href="#news-push" :aria-current="settingsOpen ? 'page' : undefined">关注与推送</a>
+      <RouterLink :to="{ name: 'news' }" :aria-current="!settingsOpen ? 'page' : undefined"
+        >报道记录</RouterLink
+      >
+      <RouterLink :to="{ name: 'news-push' }">关注与推送</RouterLink>
     </nav>
     <NewsPushSettings v-if="settingsOpen" @expired="emit('expired')" @devices="emit('devices')" />
     <template v-else>

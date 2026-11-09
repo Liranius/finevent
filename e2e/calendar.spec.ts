@@ -170,7 +170,9 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
     fullPage: true,
   });
   await page.getByRole('button', { name: '日历', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeFocused();
+  await expect(
+    page.getByRole('button', { name: new RegExp(snapshotEvent.title) }).first(),
+  ).toBeFocused();
 });
 
 test('补充来源：单独标记、来源链接和 BLS 故障同时保留', async ({ page }, testInfo) => {

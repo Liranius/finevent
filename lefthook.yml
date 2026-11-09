@@ -1,18 +1,19 @@
 pre-commit:
   piped: true
+  # 由 Lefthook 按文件自动引用路径，避免 Windows 的 sh -c 吞掉嵌套双引号。
   jobs:
     - name: oxlint
-      run: pnpm exec oxlint --fix --no-error-on-unmatched-pattern "{staged_files}"
+      run: pnpm exec oxlint --fix --no-error-on-unmatched-pattern {staged_files}
       stage_fixed: true
     - name: eslint
-      run: pnpm exec eslint --fix --cache "{staged_files}"
+      run: pnpm exec eslint --fix --cache {staged_files}
       stage_fixed: true
     - name: stylelint
       glob: '**/*.{css,vue}'
-      run: pnpm exec stylelint --fix "{staged_files}"
+      run: pnpm exec stylelint --fix {staged_files}
       stage_fixed: true
     - name: format
-      run: pnpm exec oxfmt --no-error-on-unmatched-pattern "{staged_files}"
+      run: pnpm exec oxfmt --no-error-on-unmatched-pattern {staged_files}
       stage_fixed: true
 
 commit-msg:

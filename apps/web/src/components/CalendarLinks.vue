@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 
 import { api, ApiError } from '../api';
 import { beijingDay, eventOrigin, eventTime, states, type CalendarEvent } from '../calendar';
@@ -163,10 +164,14 @@ onUnmounted(() => {
     </p>
     <ul v-if="links" class="plain-list">
       <li v-for="link in links.items" :key="link.id">
-        <a
+        <RouterLink
           class="news-related-link"
-          :href="news ? `#event=${link.event.id}` : `#news=${link.news.id}`"
-          >{{ news ? link.event.title : link.news.title }}</a
+          :to="
+            news
+              ? { name: 'calendar-event', params: { id: link.event.id } }
+              : { name: 'news-detail', params: { id: link.news.id } }
+          "
+          >{{ news ? link.event.title : link.news.title }}</RouterLink
         >
         <p class="caption">
           {{

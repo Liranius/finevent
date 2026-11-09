@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref } from 'vue';
+import { RouterLink } from 'vue-router';
 
 import { api, ApiError, formatTime } from '../api';
 import type { NewsPushData, NewsPushSettings } from '../news-push';
@@ -159,9 +160,12 @@ onUnmounted(() => {
             <strong>{{ reminderState(item) }}</strong
             ><time>{{ formatTime(item.created) }}</time>
           </div>
-          <a v-if="item.news_id" class="reminder-event-link" :href="`#news=${item.news_id}`">{{
-            item.title
-          }}</a>
+          <RouterLink
+            v-if="item.news_id"
+            class="reminder-event-link"
+            :to="{ name: 'news-detail', params: { id: item.news_id } }"
+            >{{ item.title }}</RouterLink
+          >
           <strong v-else>{{ item.title }} · 原报道已按保留期清理</strong>
           <p>{{ item.label }} · {{ item.reason }} · 第 {{ item.version }} 版</p>
           <p class="caption">{{ item.body }}</p>

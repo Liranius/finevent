@@ -77,6 +77,7 @@ function visible() {
   if (!busy.value && document.visibilityState === 'visible') void refresh();
 }
 onMounted(() => {
+  document.getElementById('ai-heading')?.focus();
   void refresh();
   timer = setInterval(visible, 30000);
   document.addEventListener('visibilitychange', visible);
@@ -94,7 +95,7 @@ onUnmounted(() => {
     <div class="page-heading">
       <div>
         <span class="eyebrow">INTERPRETATION RECORD</span>
-        <h1>AI 解读</h1>
+        <h1 id="ai-heading" tabindex="-1">AI 解读</h1>
         <p class="intro">保留事实依据，逐个对象看影响条件。</p>
       </div>
       <button :disabled="busy" @click="refresh(true)">刷新用量</button>
