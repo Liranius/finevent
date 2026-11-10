@@ -136,10 +136,9 @@ def validate_report(report, now):
     return finished
 
 
-def preflight(directory):
+def inspect_persistence(accepted):
+    """Read current invariants without installing, backing up or changing services."""
     evidence = BACKUPS/PERSIST_ID
-    accepted = json.loads((evidence/'report.json').read_text())
-    finished = validate_report(accepted, time.time())
     state = json.loads((evidence/'state.json').read_text())
     # Read only the managed file identities from the accepted operation; never reapply it.
     files = state.get('files', [])
@@ -169,6 +168,24 @@ def preflight(directory):
     counters = accepted['resources']['baseline_counters']
     require(all(baseline[key] == counters[key] for key in counters), 'OOM counters changed or reset after the accepted report')
     require(baseline['available'] >= 128*MIB, 'Less than 128 MiB current host headroom')
+    return {'previous_release': str(previous), 'baseline': baseline, 'container': current,
+            'config_sha256': recovery.sha(DATA/'config.json'), 'finevent_pid': pid}
+
+
+def preflight(directory, baseline_id=None, baseline_sha256=None):
+    evidence = BACKUPS/PERSIST_ID
+    accepted = json.loads((evidence/'report.json').read_text())
+    if baseline_id:
+        import persistence_baseline
+        renewed = persistence_baseline.load(baseline_id, baseline_sha256)
+        finished = datetime.fromisoformat(renewed['observation_ended']).timestamp()
+    else:
+        require(not baseline_sha256, 'Baseline ID and digest must be supplied together')
+        finished = validate_report(accepted, time.time())
+    current = inspect_persistence(accepted)
+    if baseline_id:
+        persistence_baseline.validate_current(renewed, current)
+    counters = accepted['resources']['baseline_counters']
     with closing(readonly(DATA/'finevent.db')) as conn:
         rows = list(conn.execute('SELECT at,available,oom_kills FROM resources WHERE at>=? ORDER BY at', (int(finished),)))
     require(rows and rows[0]['at'] <= finished+180 and time.time()-rows[-1]['at'] <= 180
@@ -178,9 +195,9 @@ def preflight(directory):
     backup = directory/'before.db'
     checksum = snapshot(DATA/'finevent.db', backup)
     return {'status': 'passed', 'persistence_id': PERSIST_ID, 'report_sha256': recovery.sha(evidence/'report.json'),
-            'previous_release': str(previous), 'baseline': baseline, 'container': current,
+            **current, 'renewed_baseline': {'id': baseline_id, 'report_sha256': baseline_sha256} if baseline_id else None,
             'history_samples': len(rows), 'history_available_min_mib': min(r['available'] for r in rows)/MIB,
-            'database_snapshot_sha256': checksum, 'config_sha256': recovery.sha(DATA/'config.json')}
+            'database_snapshot_sha256': checksum}
 
 
 def reminder_state(conn):
@@ -325,6 +342,25 @@ def review_previous(run_id):
     require(active in ('inactive', 'failed'), 'Previous calendar observer is still active; do not interrupt it')
     return {'id': run_id, 'report_sha256': recovery.sha(path),
             'trend_source_review': ({**calendar_review.manifest()[run_id]} if trend_review else None)}
+
+
+def review_failed_preflight(run_id, report_sha256, after_review):
+    """Explicitly cross one stopped, pre-install failure; retain its original evidence."""
+    require(ID_PATTERN.fullmatch(run_id) and run_id != after_review, 'Invalid failed operation ID')
+    path = BACKUPS/run_id/'report.json'
+    require(re.fullmatch(r'[a-f0-9]{64}', report_sha256 or '') and recovery.sha(path) == report_sha256,
+            'Failed operation report changed')
+    failed = json.loads(path.read_text())
+    require(failed.get('id') == run_id and failed.get('status') == 'incomplete' and failed.get('stage') == 'preflight'
+            and failed.get('failure') and failed.get('finished_at') and failed.get('after_review') == after_review
+            and failed.get('verification_profile', 'calendar') in ('calendar', 'news')
+            and not any(key in failed for key in ('installer_evidence', 'deployment', 'rollback', 'replace_observation')),
+            'Only an explicit pre-install failure can be recovered')
+    active = observer_state(run_id)
+    require(active['ActiveState'] in ('inactive', 'failed') and active['MainPID'] == '0', 'Failed observer is still active or unknown')
+    previous = review_previous(after_review)
+    require(failed.get('previous_review') == previous, 'Original predecessor evidence changed or was not reviewed')
+    return {'id': run_id, 'report_sha256': report_sha256, 'previous_review': previous}
 
 
 def validate_interruptible(report, run_id, active_release):
@@ -501,6 +537,7 @@ def trend_outputs(start, end, minimum_cycles=2):
             and polls[2] is not None and end-polls[2] <= 180
             and html.is_file() and html.stat().st_size > 0 and html.stat().st_mtime >= max((r['at'] for r in records), default=end))
     return {'status': 'passed' if good else 'needs_review', 'cycles': len(records),
+            'distinct_cycles': len({r['at']//1800 for r in records if r['items'] > 0}),
             'source_failures': sum(s['status'] != 'success' for s in sources), 'polls': polls[0],
             'poll_failures': polls[1], 'last_import': polls[2], 'html_mtime': html.stat().st_mtime if html.exists() else None}
 
@@ -594,7 +631,9 @@ def run(directory, report):
                 report['previous_review'] = finish_replacement(directory, report)
             elif report.get('after_review'):
                 report['previous_review'] = review_previous(report['after_review'])
-            report['preflight'] = preflight(directory)
+            if report.get('recover_preflight'):
+                report['recovery'] = review_failed_preflight(report['recover_preflight'], report['failed_report_sha256'], report['after_review'])
+            report['preflight'] = preflight(directory, report.get('baseline_id'), report.get('baseline_sha256'))
             if report.get('verification_profile') == 'ai':
                 import ai_release
                 ai_release.preflight()
@@ -677,6 +716,10 @@ def main():
     predecessor = parser.add_mutually_exclusive_group()
     predecessor.add_argument('--after-review')
     predecessor.add_argument('--replace-observation')
+    parser.add_argument('--baseline-id')
+    parser.add_argument('--baseline-sha256')
+    parser.add_argument('--recover-preflight')
+    parser.add_argument('--failed-report-sha256')
     parser.add_argument('--wait-ready', type=int, default=0)
     parser.add_argument('--news', action='store_true')
     parser.add_argument('--ai', action='store_true')
@@ -689,6 +732,10 @@ def main():
     require(not args.news or (args.launch and not args.replace_observation), 'News profile requires a new launch after a completed review')
     require(not args.ai or (args.launch and args.after_review and not args.news and not args.replace_observation),
             'AI profile requires a completed predecessor and cannot replace another observation')
+    require(bool(args.baseline_id) == bool(args.baseline_sha256) and bool(args.recover_preflight) == bool(args.failed_report_sha256),
+            'Evidence IDs and digests must be paired')
+    require(not (args.baseline_id or args.recover_preflight) or (args.launch and args.after_review and not args.ai),
+            'Baseline renewal and pre-install recovery require a non-AI launch after review')
     require(os.geteuid() == 0 and ID_PATTERN.fullmatch(args.run_id), 'Root and a valid operation ID are required')
     os.umask(0o077)
     directory = BACKUPS/args.run_id
@@ -703,6 +750,9 @@ def main():
             report['after_review'] = args.after_review
         if args.replace_observation:
             report['replace_observation'] = args.replace_observation
+        for key in ('baseline_id', 'baseline_sha256', 'recover_preflight', 'failed_report_sha256'):
+            if getattr(args, key):
+                report[key] = getattr(args, key)
         recovery.save(directory/'report.json', report)
         if args.ai:
             import ai_release

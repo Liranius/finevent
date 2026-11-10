@@ -16,8 +16,10 @@ import sys
 import tempfile
 
 ID = re.compile(r'calendar-release-\d{8}T\d{6}Z-[a-f0-9]{8}')
+BASELINE_ID = re.compile(r'persistence-check-\d{8}T\d{6}Z-[a-f0-9]{8}')
 DIGEST = re.compile(r'[a-f0-9]{64}')
 MAX_ARCHIVE = 128 * 1024**2
+EVIDENCE_OPTIONS = ('baseline_id', 'baseline_sha256', 'recover_preflight', 'failed_report_sha256')
 
 
 class ControllerError(RuntimeError):
@@ -62,20 +64,30 @@ def parse_request(command):
     action = request.get('action')
     allowed = {'action', 'id', 'private'} if action == 'status' else {'action'}
     if action == 'deploy':
-        allowed = {'action', 'id', 'profile', 'after_review', 'replace_observation', 'archive_sha256', 'content_sha256'}
-    require(action in ('preflight', 'status', 'deploy') and not set(request) - allowed, 'Unsupported request')
+        allowed = {'action', 'id', 'profile', 'after_review', 'replace_observation', 'archive_sha256', 'content_sha256', *EVIDENCE_OPTIONS}
+    if action == 'baseline':
+        allowed = {'action', 'id', 'archive_sha256', 'content_sha256'}
+    require(action in ('preflight', 'status', 'deploy', 'baseline') and not set(request) - allowed, 'Unsupported request')
     if action != 'preflight':
-        require(isinstance(request.get('id'), str) and (ID.fullmatch(request['id']) or action == 'status' and request['id'] == 'latest'), 'Invalid operation ID')
+        pattern = BASELINE_ID if action == 'baseline' else ID
+        require(isinstance(request.get('id'), str) and (pattern.fullmatch(request['id']) or action == 'status' and (request['id'] == 'latest' or BASELINE_ID.fullmatch(request['id']))), 'Invalid operation ID')
     if action == 'status':
         require(isinstance(request.get('private', False), bool), 'Invalid report option')
-    if action == 'deploy':
-        require(request.get('profile') in ('calendar', 'news'), 'Interactive AI initialization is a separate local operation')
+    if action in ('deploy', 'baseline'):
         for key in ('archive_sha256', 'content_sha256'):
             require(isinstance(request.get(key), str) and DIGEST.fullmatch(request[key]), 'Invalid release digest')
+    if action == 'deploy':
+        require(request.get('profile') in ('calendar', 'news'), 'Interactive AI initialization is a separate local operation')
         previous = [request.get('after_review'), request.get('replace_observation')]
         require(sum(bool(item) for item in previous) == 1 and all(not item or isinstance(item, str) and ID.fullmatch(item) for item in previous), 'Specify one predecessor')
         require(not request.get('replace_observation') or request['profile'] == 'calendar', 'Only calendar observations can be replaced')
         require(request['id'] not in previous, 'Operation cannot replace itself')
+        for key, digest, pattern in (('baseline_id', 'baseline_sha256', BASELINE_ID), ('recover_preflight', 'failed_report_sha256', ID)):
+            value, checksum = request.get(key), request.get(digest)
+            require(bool(value) == bool(checksum), 'Evidence IDs and digests must be paired')
+            if value:
+                require(isinstance(value, str) and pattern.fullmatch(value) and isinstance(checksum, str) and DIGEST.fullmatch(checksum)
+                        and request.get('after_review') and value != request['id'], 'Invalid reviewed evidence')
     return request
 
 
@@ -95,6 +107,9 @@ class Controller:
         self.config, self.state = config, state
         self.backups = Path(config['backupRoot'])
         self.checker = checker or runpy.run_path(str(Path(__file__).with_name('check-release.py')))['check_archive']
+
+    def operation_path(self, run_id):
+        return self.state/('baselines' if BASELINE_ID.fullmatch(run_id) else 'operations')/run_id
 
     def latest(self):
         # Include legacy interactive operations: a stale local pointer cannot bypass them.
@@ -122,7 +137,7 @@ class Controller:
             run_id = self.latest()
         if not run_id:
             return {'found': False}
-        operation_path = self.state/'operations'/run_id/'operation.json'
+        operation_path = self.operation_path(run_id)/'operation.json'
         report_path = self.backups/run_id/'report.json'
         operation = read(operation_path) if operation_path.is_file() else None
         if not report_path.is_file():
@@ -142,6 +157,11 @@ class Controller:
                   'source_commit': operation.get('source_commit') if operation else None,
                   'generic_sha256': operation.get('generic_sha256') if operation else None,
                   'checks': {key: report.get(key, {}).get('status') for key in ('restart', 'backup_verification')}}
+        if BASELINE_ID.fullmatch(run_id):
+            result['baseline_checks'] = {'history_scope': report.get('history_scope'), 'trendradar': report.get('trendradar', {}).get('status'),
+                                         'distinct_cycles': report.get('trendradar', {}).get('distinct_cycles'),
+                                         'resources': {key: report.get('resources', {}).get(key) for key in
+                                                       ('samples', 'host_available_min_mib', 'max_sample_interval_seconds', 'host_oom_kill_delta', 'trend_oom_kill_delta', 'finevent_oom_kill_delta')}}
         if private:
             report['observer_status'] = observer
             if interrupted:
@@ -153,17 +173,20 @@ class Controller:
         require((Path(self.config['appRoot'])/'current').is_dir(), 'Initialize the application separately before using Actions')
         require((Path(self.config['dataRoot'])/'config.json').is_file(), 'Application configuration is missing')
         require(self.backups.is_dir(), 'Backup directory is missing')
-        return {'protocol': 1, 'ready': True, 'latest': self.status('latest')}
+        return {'protocol': 2, 'ready': True, 'latest': self.status('latest')}
 
     @staticmethod
     def identity(request):
-        return {key: request.get(key) for key in ('content_sha256', 'profile', 'after_review', 'replace_observation')}
+        identity = {key: request.get(key) for key in ('content_sha256', 'profile', 'after_review', 'replace_observation')}
+        identity.update({key: request[key] for key in EVIDENCE_OPTIONS if request.get(key)})
+        return identity
 
     def launch(self, bundle, request, log):
-        args = ['/usr/bin/python3', '-B', str(bundle/'deploy/calendar_release.py'), '--run-id', request['id'], '--launch']
-        if request['profile'] == 'news':
+        runner = 'persistence_baseline.py' if request['action'] == 'baseline' else 'calendar_release.py'
+        args = ['/usr/bin/python3', '-B', str(bundle/'deploy'/runner), '--run-id', request['id'], '--launch']
+        if request.get('profile') == 'news':
             args.append('--news')
-        for key in ('after_review', 'replace_observation'):
+        for key in ('after_review', 'replace_observation', *EVIDENCE_OPTIONS):
             if request.get(key):
                 args.extend(['--'+key.replace('_', '-'), request[key]])
         # Full installer output remains private on the server, never in Actions logs.
@@ -179,15 +202,22 @@ class Controller:
                   'else:\n'
                   ' p = json.loads((c.BACKUPS/sys.argv[3]/"report.json").read_text())\n'
                   ' c.validate_interruptible(p, sys.argv[3], str((c.ROOT/"current").resolve()))\n'
-                  ' c.validate_live_predecessor(p)\n')
-        result = subprocess.run(['/usr/bin/python3', '-B', '-c', script, str(bundle/'deploy'), key, request[key]],
+                  ' c.validate_live_predecessor(p)\n'
+                  'r = json.loads(sys.argv[4])\n'
+                  'if r.get("recover_preflight"): c.review_failed_preflight(r["recover_preflight"], r["failed_report_sha256"], r["after_review"])\n'
+                  'if r.get("baseline_id"):\n'
+                  ' import persistence_baseline as b\n'
+                  ' p = b.load(r["baseline_id"], r["baseline_sha256"])\n'
+                  ' b.validate_current(p, c.inspect_persistence(b.original()[0]))\n')
+        result = subprocess.run(['/usr/bin/python3', '-B', '-c', script, str(bundle/'deploy'), key, request[key], json.dumps(request)],
                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
         require(result.returncode == 0, 'Predecessor verification failed; no operation registered')
 
     def deploy(self, request, stream):
         self.preflight()
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
-        operations = self.state/'operations'
+        baseline = request['action'] == 'baseline'
+        operations = self.state/('baselines' if baseline else 'operations')
         operations.mkdir(mode=0o700, exist_ok=True)
         with exclusive(self.state/'register.lock'):
             destination = operations/request['id']
@@ -196,7 +226,11 @@ class Controller:
                 require(read(record)['identity'] == self.identity(request), 'Operation ID is already bound to different content or options')
                 return self.status(request['id'])
             require(not destination.exists() and not (self.backups/request['id']).exists(), 'Operation ID is already in use')
-            require(self.latest() == (request.get('after_review') or request.get('replace_observation')), 'Predecessor is not the latest server operation')
+            if not baseline:
+                require(self.latest() == (request.get('recover_preflight') or request.get('after_review') or request.get('replace_observation')), 'Predecessor is not the latest server operation')
+                if request.get('recover_preflight'):
+                    failed = self.state/'operations'/request['recover_preflight']/'operation.json'
+                    require(failed.is_file() and read(failed)['identity'].get('after_review') == request['after_review'], 'Failed operation is not a registered successor of the reviewed release')
             with tempfile.TemporaryDirectory(prefix='receive-', dir=self.state) as temporary:
                 temporary = Path(temporary)
                 archive = temporary/'release.tar.gz'
@@ -211,7 +245,9 @@ class Controller:
                 files = self.checker(archive)
                 require(content_digest(files) == request['content_sha256'], 'Release content identity mismatch')
                 require('deploy/calendar_release.py' in files, 'Missing release runner')
-                if request['profile'] == 'news':
+                if baseline:
+                    require('deploy/persistence_baseline.py' in files, 'Missing read-only baseline runner')
+                if request.get('profile') == 'news':
                     require('deploy/news_release.py' in files, 'Missing news verification runner')
                 metadata = json.loads(files.get('release.json', b'{}'))
                 bundle = temporary/'bundle'
@@ -219,7 +255,8 @@ class Controller:
                     target = bundle/name
                     target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                     target.write_bytes(data)
-                self.check_predecessor(bundle, request)
+                if not baseline:
+                    self.check_predecessor(bundle, request)
                 # Register the immutable bundle and identity before any launch side effect.
                 destination.mkdir(mode=0o700)
                 shutil.move(str(bundle), str(destination/'bundle'))
@@ -237,7 +274,7 @@ def main():
     os.umask(0o077)
     request = parse_request(os.environ.get('SSH_ORIGINAL_COMMAND', ''))
     controller = Controller(read(Path(__file__).with_name('config.json')))
-    if request['action'] == 'deploy':
+    if request['action'] in ('deploy', 'baseline'):
         result = controller.deploy(request, sys.stdin.buffer)
     elif request['action'] == 'status':
         result = controller.status(request['id'], request.get('private', False))

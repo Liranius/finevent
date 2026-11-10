@@ -87,11 +87,12 @@ class ControllerTests(unittest.TestCase):
         files['release.json'] = json.dumps({'schema': 1, 'kind': 'deployment', 'target': 'linux/amd64', 'source_commit': 'a'*40, 'source_dirty': False, 'generic_sha256': 'b'*64}).encode()
         files['deploy/calendar_release.py'] = b'# check-predecessor fixture'
         files['deploy/news_release.py'] = b'# fixture'
+        files['deploy/persistence_baseline.py'] = b'# read-only fixture'
         bundles.ReleaseBundleTests.write(self, files)
         files = self.controller.checker(self.archive)
         self.request = {'action': 'deploy', 'id': CURRENT, 'profile': 'news', 'after_review': PREVIOUS,
                         'replace_observation': None, 'archive_sha256': hashlib.sha256(self.archive.read_bytes()).hexdigest(), 'content_sha256': control.content_digest(files)}
-        self.launch = patch.object(self.controller, 'launch', side_effect=lambda *_: self.report(CURRENT, 'queued')).start()
+        self.launch = patch.object(self.controller, 'launch', side_effect=lambda _bundle, request, _log: self.report(request['id'], 'queued')).start()
         self.predecessor = patch.object(self.controller, 'check_predecessor').start()
 
     def report(self, run_id, status='completed_for_review'):
@@ -109,6 +110,44 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(first['identity'], again['identity'])
         self.launch.assert_called_once()
         self.assertEqual(self.controller.latest(), CURRENT)
+
+    def test_baseline_registration_is_idempotent_and_does_not_replace_latest_release(self):
+        request = {key: value for key, value in self.request.items() if key in ('archive_sha256', 'content_sha256')}
+        request.update(action='baseline', id='persistence-check-20261110T000000Z-11111111')
+        first = self.send(request)
+        again = self.send(request, data=b'')
+        self.assertEqual(first['identity'], again['identity'])
+        self.assertEqual(self.controller.latest(), PREVIOUS)
+        self.launch.assert_called_once()
+        self.predecessor.assert_not_called()
+
+    def test_recovery_requires_latest_registered_failure_and_binds_all_evidence(self):
+        self.send()
+        next_id = 'calendar-release-20261110T000000Z-11111111'
+        request = {**self.request, 'id': next_id, 'recover_preflight': CURRENT, 'failed_report_sha256': 'd'*64,
+                   'baseline_id': 'persistence-check-20261110T000000Z-22222222', 'baseline_sha256': 'e'*64}
+        result = self.send(request)
+        self.assertEqual(result['identity']['failed_report_sha256'], 'd'*64)
+        self.predecessor.assert_called_with(unittest.mock.ANY, request)
+        with self.assertRaisesRegex(RuntimeError, 'different'):
+            self.send({**request, 'baseline_sha256': 'f'*64})
+        self.assertEqual(self.launch.call_count, 2)
+
+    def test_baseline_and_recovery_options_are_validated_before_transport(self):
+        bad = ({'baseline_id': '../../x', 'baseline_sha256': 'a'*64}, {'baseline_id': 'persistence-check-20261110T000000Z-11111111'},
+               {'recover_preflight': PREVIOUS}, {'failed_report_sha256': 'a'*64},
+               {'recover_preflight': CURRENT, 'failed_report_sha256': 'a'*64})
+        for change in bad:
+            with self.subTest(change=change), self.assertRaises(RuntimeError):
+                control.parse_request('finevent-release '+base64.b64encode(json.dumps({**self.request, **change}).encode()).decode())
+
+    def test_baseline_launch_uses_only_readonly_runner(self):
+        request = {'action': 'baseline', 'id': 'persistence-check-20261110T000000Z-11111111'}
+        with patch.object(control.subprocess, 'run', return_value=unittest.mock.Mock(returncode=0)) as command:
+            control.Controller.launch(self.controller, self.root/'bundle', request, self.root/'launch.log')
+        args = command.call_args.args[0]
+        self.assertTrue(args[2].endswith('persistence_baseline.py'))
+        self.assertNotIn('--news', args)
 
     def test_unknown_launch_outcome_never_relaunches(self):
         self.launch.side_effect = TimeoutError('acknowledgement lost')

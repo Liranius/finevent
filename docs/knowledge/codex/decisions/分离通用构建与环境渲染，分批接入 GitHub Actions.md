@@ -61,3 +61,4 @@ Deploy 只选取同仓库 main push CI 的成功产物，核对 GitHub artifact 
 ## Relations
 
 - follows [[Codex checkpoint - 2026-11-09T13-11-02Z - finevent工程基线与待验收事项]]
+- extended_by [[通过只读复验更新部署基线，显式恢复安装前失败]]

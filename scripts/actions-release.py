@@ -96,6 +96,8 @@ def main():
     parser.add_argument('--id')
     parser.add_argument('--profile', choices=('calendar', 'news'), default='calendar')
     parser.add_argument('--after-review')
+    for key in ('baseline-id', 'baseline-sha256', 'recover-preflight', 'failed-report-sha256'):
+        parser.add_argument('--'+key)
     parser.add_argument('--directory')
     args = parser.parse_args()
     repository = os.environ.get('GITHUB_REPOSITORY', 'Liranius/finevent')
@@ -136,7 +138,9 @@ def main():
             result = subprocess.run(['pwsh', '-NoProfile', '-NonInteractive', '-File', str(ROOT/'scripts/render-release.ps1'),
                                      '-Archive', str(archive), '-OutputDirectory', str(temporary/'rendered'), '-ConfigPath', str(temporary/'config.json')], capture_output=True, check=False)
             require(result.returncode == 0, 'Private deployment rendering failed')
-            response = client['deploy'](ssh, temporary/'rendered'/archive.name, run_id, args.profile, args.after_review, None)
+            response = client['deploy'](ssh, temporary/'rendered'/archive.name, run_id, args.profile, args.after_review, None,
+                                       baseline_id=args.baseline_id, baseline_sha256=args.baseline_sha256,
+                                       recover_preflight=args.recover_preflight, failed_report_sha256=args.failed_report_sha256)
         else:
             require(args.id, 'Report requires an operation ID or latest')
             response = client['request_remote'](ssh, {'action': 'status', 'id': args.id})

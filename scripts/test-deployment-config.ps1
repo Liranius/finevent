@@ -52,6 +52,17 @@ try {
     $arguments = Get-Content -LiteralPath $env:FINEVENT_TEST_ARGUMENTS -Raw | ConvertFrom-Json
     Assert-Deployment ($LASTEXITCODE -eq 17 -and $arguments[-1] -eq 'operator@node.invalid:/private-test/sshStageRoot/') 'SCP destination or exit code changed'
     Assert-Deployment ((Get-Content -LiteralPath $arguments[-2] -Raw) -match 'portal.invalid') 'SCP uploaded an unrendered source'
+    function python { @($args) | ConvertTo-Json -Compress | Set-Content -LiteralPath $env:FINEVENT_TEST_ARGUMENTS; $global:LASTEXITCODE = 0 }
+    & (Join-Path $PSScriptRoot 'publish-news.ps1') -Archive 'fixture.tar.gz' -AfterReview 'previous' -BaselineId 'baseline' -BaselineSha256 'baseline-hash' -RecoverPreflight 'failed' -FailedReportSha256 'failed-hash'
+    $arguments = Get-Content -LiteralPath $env:FINEVENT_TEST_ARGUMENTS -Raw | ConvertFrom-Json
+    foreach ($pair in @(@('--baseline-id','baseline'), @('--baseline-sha256','baseline-hash'), @('--recover-preflight','failed'), @('--failed-report-sha256','failed-hash'))) {
+        $position = [Array]::IndexOf($arguments, $pair[0])
+        Assert-Deployment ($position -ge 0 -and $arguments[$position+1] -eq $pair[1]) 'Recovery option argument boundary changed'
+    }
+    & (Join-Path $PSScriptRoot 'verify-baseline.ps1') -Archive 'fixture.tar.gz'
+    $arguments = Get-Content -LiteralPath $env:FINEVENT_TEST_ARGUMENTS -Raw | ConvertFrom-Json
+    Assert-Deployment ($arguments[1] -eq 'baseline' -and $arguments -notcontains 'deploy') 'Read-only baseline selected the deployment action'
+    Remove-Item Function:python
     foreach ($invalid in @(@('sshTarget','user@host;bad'), @('siteHost','host.invalid;bad'), @('dataRoot','/tmp/../etc'), @('dataRoot','/tmp/a b'))) {
         $bad = $settings.Clone(); $bad[$invalid[0]] = $invalid[1]
         $bad | ConvertTo-Json | Set-Content -LiteralPath $env:FINEVENT_DEPLOY_CONFIG -Encoding utf8
@@ -59,6 +70,7 @@ try {
     }
     Write-Host "Deployment configuration checks passed: $($entrypoints.Count) entrypoints, rendering, native arguments, exit codes and invalid settings."
 } finally {
+    Remove-Item Function:python -ErrorAction SilentlyContinue
     Remove-Item Function:Get-Command -ErrorAction SilentlyContinue
     $env:FINEVENT_DEPLOY_CONFIG = $previousConfig
     Remove-Item Env:FINEVENT_TEST_ARGUMENTS -ErrorAction SilentlyContinue

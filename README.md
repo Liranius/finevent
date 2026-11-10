@@ -189,7 +189,13 @@ GitHub 的 `production` environment 仅允许 `main` 分支，配置三个 envir
 
 手动运行 **Report**，填写具体操作 ID 或 `latest`。它仅查询既有报告，不启动安装、采集或模型调用；日志和摘要不包含完整服务器报告、地址及路径。本地 `publish-calendar.ps1 -Report -RunId <操作ID>` 可将完整私有报告下载到 `.validation/<操作ID>/report.json`，不依赖原发布电脑的指针。后台观察超出 job 生命周期，绿色的启动/查询 job 不代表生产验收完成。服务器保留完整报告、备份、回滚依据和控制器私有日志；恢复前核对当前状态。
 
-TODO: 第二批首次服务器初始化、真实 Actions Deploy/Report、生产页面/PWA 与旧深链接，以及长时观察和真机通知仍须完成验收；实现和离线测试通过不能替代这些结果。
+已完成专用 SSH 初始化、production Secrets、真实 Report、非法 CI 来源拒绝及同一 Deploy 重跑幂等验证。首次生产 Deploy 被旧固化证据的七天有效期拦在安装前，应用未变；结果见[验收状态](docs/implementation-status.md#actions-部署验收)。
+
+固化证据过期时，可用 `pwsh -NoProfile -File scripts/verify-baseline.ps1 -Archive <已核对来源的环境渲染包>` 启动 65 分钟只读复验；使用 `-Report -RunId <persistence-check-ID>` 下载完整报告，Actions **Report** 也接受该 ID。复验不重建容器、不重启服务、不触发采集或模型请求；核对原固化文件/容器/配置、连续资源采样、至少两轮正常采集及 HTTPS。它明确保留旧记录的保留期缺口，只为新观察窗口及之后提供证据。报告完成并审核后，发布显式传入 `-BaselineId` 与 `-BaselineSha256`（Actions 对应 `baseline_id` / `baseline_sha256`）；七天有效期、窗口结束后的连续历史及现有资源门禁仍生效。
+
+若最新部署明确在安装前失败，审核原报告后可同时传入 `-RecoverPreflight <失败ID>`、`-FailedReportSha256 <报告摘要>`，`-AfterReview` 仍指向前一个已完成验收的操作；Actions 使用相应的 snake_case 参数。仅接受已停止、未进入安装、无安装/回滚/观察替换痕迹的 calendar/news 失败；重新复核原前序验收及当前版本，保留失败记录，以新 ID 登记恢复操作。报告变化、进程仍活动、安装结果不明或 AI 初始化失败均不能用此入口放行。服务端控制器需升级到协议 2：沿用已有专用密钥再次运行初始化脚本即可，不改变生产应用。
+
+TODO: 只读基线复验和显式恢复仍需真实服务器验收；通过后继续验证 Actions 实际安装、生产页面/PWA 与旧深链接、长时观察和真机通知。实现和离线测试通过不能替代这些结果。
 
 ### 原验证版安装与共用机制
 

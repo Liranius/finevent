@@ -64,6 +64,8 @@ def check_archive(filename, kind='deployment'):
         raise RuntimeError('Missing reviewed calendar evidence manifest')
     if b'--news' in files.get('deploy/calendar_release.py', b'') and 'deploy/news_release.py' not in manifest:
         raise RuntimeError('Missing news verification runner')
+    if b'import persistence_baseline' in files.get('deploy/calendar_release.py', b'') and 'deploy/persistence_baseline.py' not in manifest:
+        raise RuntimeError('Missing read-only baseline runner')
     if b'--ai' in files.get('deploy/calendar_release.py', b'') and 'deploy/ai_release.py' not in manifest:
         raise RuntimeError('Missing AI verification runner')
     if b'import news_push_release' in files.get('deploy/news_release.py', b'') and 'deploy/news_push_release.py' not in manifest:

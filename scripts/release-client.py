@@ -58,11 +58,17 @@ def request_remote(ssh, request, archive=None):
     return response
 
 
-def deploy(ssh, archive, run_id, profile, after_review, replace_observation, transport=request_remote):
+def deploy(ssh, archive, run_id, profile, after_review, replace_observation, transport=request_remote,
+           baseline_id=None, baseline_sha256=None, recover_preflight=None, failed_report_sha256=None, action='deploy'):
     files = runpy.run_path(str(ROOT/'scripts/check-release.py'))['check_archive'](archive)
     request = {'action': 'deploy', 'id': run_id, 'profile': profile, 'after_review': after_review,
                'replace_observation': replace_observation, 'content_sha256': controller['content_digest'](files),
                'archive_sha256': hashlib.sha256(Path(archive).read_bytes()).hexdigest()}
+    request.update({key: value for key, value in zip(controller['EVIDENCE_OPTIONS'],
+                    (baseline_id, baseline_sha256, recover_preflight, failed_report_sha256)) if value})
+    if action == 'baseline':
+        request = {key: value for key, value in request.items() if key not in ('profile', 'after_review', 'replace_observation')}
+        request['action'] = action
     # Validate before any network access, including malformed IDs or contradictory options.
     controller['parse_request']('finevent-release '+base64.b64encode(json.dumps(request).encode()).decode())
     previous = transport(ssh, {'action': 'status', 'id': run_id})
@@ -81,7 +87,7 @@ def write_json(path, data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('preflight', 'status', 'deploy', 'bootstrap'))
+    parser.add_argument('mode', choices=('preflight', 'status', 'deploy', 'baseline', 'bootstrap'))
     parser.add_argument('--target', required=True)
     parser.add_argument('--identity', default=os.environ.get('FINEVENT_SSH_KEY_FILE', str(ROOT/'.validation/deploy-access/id_ed25519')))
     parser.add_argument('--known-hosts', default=os.environ.get('FINEVENT_KNOWN_HOSTS_FILE', str(ROOT/'.validation/deploy-access/known_hosts')))
@@ -90,6 +96,8 @@ def main():
     parser.add_argument('--profile', choices=('calendar', 'news'), default='calendar')
     parser.add_argument('--after-review')
     parser.add_argument('--replace-observation')
+    for key in controller['EVIDENCE_OPTIONS']:
+        parser.add_argument('--'+key.replace('_', '-'))
     parser.add_argument('--private-report', action='store_true')
     parser.add_argument('--output')
     args = parser.parse_args()
@@ -103,16 +111,20 @@ def main():
         if result.returncode:
             raise RuntimeError('One-time server initialization failed')
         return
-    if args.mode == 'deploy':
+    if args.mode in ('deploy', 'baseline'):
         if not args.archive:
             raise RuntimeError('Archive is required')
-        args.id = args.id or 'calendar-release-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
+        if args.mode == 'baseline' and (args.after_review or args.replace_observation or any(getattr(args, key) for key in controller['EVIDENCE_OPTIONS'])):
+            raise RuntimeError('Read-only baseline does not accept deployment options')
+        prefix = 'persistence-check' if args.mode == 'baseline' else 'calendar-release'
+        args.id = args.id or prefix+'-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
         # Save the request cursor before SSH: a lost acknowledgement must not lose its identity.
-        write_json(ROOT/'.validation/calendar-release-latest.json', {'id': args.id, 'archive': Path(args.archive).name, 'verification_profile': args.profile})
+        write_json(ROOT/('.validation/'+prefix+'-latest.json'), {'id': args.id, 'archive': Path(args.archive).name, 'verification_profile': args.profile})
         print('Operation: '+args.id, flush=True)
-        result = deploy(ssh, args.archive, args.id, args.profile, args.after_review, args.replace_observation)
+        result = deploy(ssh, args.archive, args.id, args.profile, args.after_review, args.replace_observation,
+                        **{key: getattr(args, key) for key in controller['EVIDENCE_OPTIONS']}, action=args.mode)
     elif args.mode == 'status':
-        if args.archive or args.after_review or args.replace_observation:
+        if args.archive or args.after_review or args.replace_observation or any(getattr(args, key) for key in controller['EVIDENCE_OPTIONS']):
             raise RuntimeError('Status cannot be combined with deployment options')
         result = request_remote(ssh, {'action': 'status', 'id': args.id or 'latest', 'private': args.private_report})
     else:
@@ -123,7 +135,8 @@ def main():
         private = result.pop('report', None)
         if private:
             write_json(ROOT/'.validation'/result['id']/'report.json', private)
-            write_json(ROOT/'.validation/calendar-release-latest.json', {'id': result['id'], 'verification_profile': result.get('verification_profile')})
+            prefix = 'persistence-check' if controller['BASELINE_ID'].fullmatch(result['id']) else 'calendar-release'
+            write_json(ROOT/('.validation/'+prefix+'-latest.json'), {'id': result['id'], 'verification_profile': result.get('verification_profile')})
     if args.output:
         write_json(args.output, result)
     print(json.dumps(result, ensure_ascii=True, indent=2))
