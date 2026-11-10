@@ -19,6 +19,7 @@ sources:
   - apps/web/src/components/VerificationWorkspace.vue
   - apps/web/src/components/__tests__/router.spec.ts
   - e2e/navigation.spec.ts
+  - docs/implementation-status.md
 ---
 
 # 采用 Vue Router 统一导航，暂缓 Pinia
@@ -35,7 +36,7 @@ sources:
 
 同时全面迁移 Pinia 未获采用：当前共享内容主要是会话和工作区偏好，仍可由父组件及 props/emits 管理。Pinia 的后续评估条件在 README 的 TODO 维护，不因组件拆分就把正文、表单和请求状态统一提升为全局缓存。
 
-本决定没有授权提交、推送、部署或 GitHub 平台门禁配置。GitHub 验证仍在后续构建方式讨论中处理，主记录为 README 的 CI 待办。实现与测试结果须查询当前代码和当次验证日志，本笔记不将生产部署或真机 Web Push 送达记为完成。
+本决定仅确定导航与状态管理范围；后续提交、部署和 GitHub 门禁由用户另行授权，构建方案见 [[分离通用构建与环境渲染，分批接入 GitHub Actions]]。平台配置以 README 的 CI 章节为准，生产导航与真机通知的实际验收及边界见 `docs/implementation-status.md`。
 
 ## Observations
 
