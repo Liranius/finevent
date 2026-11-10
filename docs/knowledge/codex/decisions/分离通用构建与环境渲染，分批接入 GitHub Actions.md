@@ -18,6 +18,17 @@ sources:
   - deploy/install.py
   - deploy/test_release_bundle.py
   - tests/ci.test.ts
+  - .github/workflows/deploy.yml
+  - .github/workflows/report.yml
+  - scripts/actions-release.py
+  - scripts/bootstrap-deployment.ps1
+  - scripts/release-client.py
+  - scripts/publish-calendar.ps1
+  - scripts/publish-ai-initial.ps1
+  - deploy/bootstrap_release.py
+  - deploy/release_control.py
+  - deploy/test_actions_release.py
+  - deploy/test_release_control.py
 ---
 
 # 分离通用构建与环境渲染，分批接入 GitHub Actions
@@ -30,13 +41,19 @@ CI 对真实 PR 的合并结果执行完整检查，通用包构建、渲染回�
 
 采用共用脚本能同时支持本地和 Actions，避免维护两套构建流程；以明确源码身份和摘要关联产物，便于下载后在本地发布。代价是多一次显式渲染，通用包与部署包需分别保存。没有选择直接上传本地私有发布包，也没有在第一批开启推送即生产部署。
 
-第二批继续复用服务器备份、回滚和后台观察，不能把任务启动当成验收通过。日历完整观察长于 [GitHub 托管单个 job 上限](https://docs.github.com/en/actions/reference/limits)。首次装机与 AI 密钥初始化保持独立交互入口。第二批的主要 TODO 由 README 的“通用产物与本地发布”维护，本记录不重复维护执行状态。
+用户随后授权推进第二批，并确认没有现成 SSH 密钥或登录会话，由本机终端输入现有密码执行一次性初始化。服务器操作记录成为权威来源，本地指针仅作缓存；本地和 Actions 复用控制器、前序验收及锁。专用 SSH 密钥限制为固定发布命令，仍具有运行安装代码所需的 root 发布权限。首次装机与 AI 密钥初始化保持独立交互入口。
+
+Deploy 只选取同仓库 main push CI 的成功产物，核对 GitHub artifact 来源和摘要、包摘要及干净提交身份。操作 ID 绑定内容和前序参数，Actions 重新运行沿用同一 ID；响应丢失时查询既有操作，结果不明不自动重新安装。私有环境仅在临时渲染和服务器内使用，公开 Report 保留状态摘要，完整报告由本地入口下载到忽略目录。
+
+第二批继续复用服务器备份、回滚和后台观察，不能把任务启动当成验收通过。日历完整观察长于 [GitHub 托管单个 job 上限](https://docs.github.com/en/actions/reference/limits)。主要 TODO 由 README 的“SSH 初始化与 Actions 部署”维护，本记录不重复维护执行状态。
 
 ## Observations
 
 - [decision] 用户批准先实施通用构建、真实 PR 验证和 Quality 门禁，并保留本地构建发布入口。
 - [decision] 私有环境配置只在渲染阶段使用，公开 Actions 仅保存通用包和摘要。
 - [decision] 第一批不连接生产部署；生产自动化属于第二批。
+- [decision] 第二批由用户手动发起部署和报告查询；无现成 SSH 凭据时先准备一次性初始化脚本。
+- [constraint] 控制器记录与原有完整前序验收共同约束部署；删除本地指针或重新运行 job 不能绕过服务器状态。
 - [constraint] 日历完整观察长于 GitHub 托管单个 job 上限，应继续由服务器后台任务执行。
 - [branch] codex/actions-release-build
 - [pr] PR #1

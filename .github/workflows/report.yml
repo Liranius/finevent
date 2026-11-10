@@ -1,0 +1,32 @@
+name: Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation_id:
+        description: Exact operation ID, or latest for read-only preflight reporting
+        required: true
+        default: latest
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  report:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: production
+    steps:
+      - name: Checkout trusted reporting tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Query existing operation without deploying
+        env:
+          OPERATION_ID: ${{ inputs.operation_id }}
+          FINEVENT_DEPLOY_CONFIG: ${{ secrets.FINEVENT_DEPLOY_CONFIG }}
+          FINEVENT_SSH_KEY: ${{ secrets.FINEVENT_SSH_KEY }}
+          FINEVENT_KNOWN_HOSTS: ${{ secrets.FINEVENT_KNOWN_HOSTS }}
+        run: python3 scripts/actions-release.py report --id "$OPERATION_ID"

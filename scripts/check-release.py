@@ -12,8 +12,12 @@ import tarfile
 def check_archive(filename, kind='deployment'):
     files = {}
     seen = set()
+    total = 0
     with tarfile.open(filename, 'r:gz') as archive:
-        for member in archive.getmembers():
+        for member in archive:
+            total += member.size
+            if len(seen) >= 4096 or total > 128 * 1024**2:
+                raise RuntimeError('Release archive exceeds validation limits')
             path = PurePosixPath(member.name)
             if path.is_absolute() or '..' in path.parts or '\\' in member.name or ':' in member.name:
                 raise RuntimeError('Unsafe or non-POSIX archive path')

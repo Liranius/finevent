@@ -1,4 +1,4 @@
-param([string]$SshTarget, [string]$Archive, [switch]$Report, [string]$AfterReview)
+param([string]$SshTarget, [string]$Archive, [switch]$Report, [string]$AfterReview, [string]$RunId)
 $ErrorActionPreference = 'Stop'
-# A shared operation pointer/lock prevents overlapping calendar, news and AI releases.
+# First initialization keeps its hidden TTY prompt; reports use the shared controller.
 & (Join-Path $PSScriptRoot 'publish-calendar.ps1') @PSBoundParameters -AI

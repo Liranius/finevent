@@ -1,4 +1,4 @@
-param([string]$SshTarget, [string]$Archive, [switch]$Report, [string]$AfterReview)
+param([string]$SshTarget, [string]$Archive, [switch]$Report, [string]$AfterReview, [string]$RunId)
 $ErrorActionPreference = 'Stop'
-# Share one operation pointer and remote lock with calendar releases; never run two observers.
+# Share the server operation registry and observer lock with calendar releases.
 & (Join-Path $PSScriptRoot 'publish-calendar.ps1') @PSBoundParameters -News

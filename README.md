@@ -104,7 +104,7 @@ DeepSeek 首次业务发布使用 `scripts/publish-ai.ps1 -Archive <已核验发
 
 ```powershell
 .\scripts\build-release.ps1
-.\scripts\publish-calendar.ps1
+.\scripts\publish-calendar.ps1 -AfterReview <上一轮完整ID>
 ```
 
 新流程核对已接受的 `trendradar-persist-…` 报告、迁移后内存记录、当前容器、父级 slice 和只读补丁。安装复用下述备份与回滚机制，另将冻结备份恢复至一次性数据库验证可读性；随后重启一次 finevent，比较日历事件、草稿、修订和同步进度。生产表不会写入测试基金公告，不调用模型，也不改变 TrendRadar。
@@ -115,13 +115,13 @@ DeepSeek 首次业务发布使用 `scripts/publish-ai.ps1 -Archive <已核验发
 .\scripts\publish-calendar.ps1 -Report
 ```
 
-已有发布记录时，先取回并审查终态报告，再以 `-Archive <新包路径> -AfterReview <上一轮完整ID>` 启动后续版本。脚本保存上一轮操作指针；服务器再次核对原观察已结束、当前版本对应、备份/重启/资源/TrendRadar/HTTPS 通过，且没有超出统计局/BLS 限制的未解决故障。经核对已恢复的来源失败，可在 `deploy/calendar-reviews.json` 记录原报告与独立恢复证据的摘要及审核原因；仅匹配的这一轮可进入后续发布，不改写原报告，也不放宽资源、服务或来源同步检查。正在观察或已回退的报告不能放行；不删除旧指针来绕过检查。
+先取回并审查服务器最新操作的终态报告，再以 `-Archive <新包路径> -AfterReview <上一轮完整ID>` 启动后续版本。服务器记录是权威来源，本地指针仅供找回操作和诊断；服务器再次核对前序是最新操作、原观察已结束、当前版本对应、备份/重启/资源/TrendRadar/HTTPS 通过，且没有超出统计局/BLS 限制的未解决故障。经核对已恢复的来源失败，可在 `deploy/calendar-reviews.json` 记录原报告与独立恢复证据的摘要及审核原因；仅匹配的这一轮可进入后续发布，不改写原报告，也不放宽资源、服务或来源同步检查。正在观察或已回退的报告不能放行；删除本地指针不能绕过检查。
 
 若终态报告只有 TrendRadar 来源失败需要核对，执行 `.\scripts\inspect-calendar-observation.ps1`，从现有 SQLite 读取观察期间失败的来源、时间和后续恢复记录，单独保存报告及原报告摘要。它不启动新采集、不修改原观察或生产数据库，也不自动签收；缺失数据库、计数不一致和再次失败会明确保留。下载中断后用同一脚本的 `-Report` 取回证据。
 
 自动提醒首发仍默认关闭。发布流程检查新增表、引用完整性、初始零任务，并在重启前后核对设置、关注和任务标识；设备送达另行验收。安装与短暂重启完成后可操作新版，六小时来源与资源观察在后台继续，不必等它结束才测试提醒。
 
-已明确授权提前发布修复时，改用 `-Archive <新包路径> -ReplaceObservation <原观察ID>`。服务器先保存旧报告原始副本，核对其最近检查点、当前程序与配置、备份/重启、内存和服务健康，再仅停止该观察进程。未完成观察标记为 `interrupted_for_repair`，不算通过；原应用在正常安装前继续运行。新版本独立重新观察，期间应用可以使用；首份报告最多等待三分钟以包含安装进度，SSH 中断不停止后台任务。该入口不能替代对资源或部署故障的审查。
+已明确授权提前发布修复时，改用 `-Archive <新包路径> -ReplaceObservation <原观察ID>`。服务器先保存旧报告原始副本，核对其最近检查点、当前程序与配置、备份/重启、内存和服务健康，再仅停止该观察进程。未完成观察标记为 `interrupted_for_repair`，不算通过；原应用在正常安装前继续运行。新版本独立重新观察，期间应用可以使用；首份报告可能仍为排队状态，使用 `-Report -RunId <操作ID>` 继续查询，SSH 中断不停止后台任务。该入口不能替代对资源或部署故障的审查。
 
 本地报告在 `.validation/calendar-release-*/report.json`，原始样本、数据库快照和回滚依据保留在服务器对应 `/srv/example/finevent-backups/` 目录。发布后发生资源或服务故障会尝试回退，并用最新数据库保留新增业务数据；来源不可达单独标记待审查。报告含回滚命令，操作前核对当前状态；独立改动导致回滚拒绝时保留证据，不盲目重试。应用界面更新后，在手机和电脑检查日历、公告确认、改期和取消；PWA 出现“更新应用”时点击更新。
 
@@ -162,7 +162,34 @@ python scripts/check-release.py release/generic/finevent-<时间>.tar.gz --kind 
 
 `render-release.ps1` 可通过 `-ConfigPath` 指定配置、`-OutputDirectory` 指定输出目录，不覆盖已有发布包。`pwsh -NoProfile -NonInteractive -File scripts/test-release.ps1` 使用最近的通用包和虚构配置验证渲染与失败路径，不连接服务器。CI 在同一检出目录完成浏览器测试与构建后使用 `-SkipFrontendBuild` 复用该前端产物；普通本地构建不需要此参数。
 
-TODO: 第二批接入 Actions 手动部署、SSH 密钥认证与服务器报告查询；完成前继续使用本地发布入口，并保留现有备份、回滚和前序验收要求。
+### SSH 初始化与 Actions 部署
+
+已有服务首次接入时，在本机终端执行：
+
+```powershell
+.\scripts\bootstrap-deployment.ps1 -PrepareOnly
+.\scripts\bootstrap-deployment.ps1
+```
+
+脚本读取私有部署配置，生成独立 Ed25519 部署密钥，从本机已信任的 `known_hosts` 提取该主机记录，存放到 `.validation/deploy-access/`。Windows 限制该目录为当前用户访问，Linux 使用目录 0700、凭据 0600；重复执行保留原密钥。准备阶段不联网，安装阶段由用户在自己的终端输入现有 root SSH 密码。首次未知主机须先通过服务器控制台核对指纹，不使用未经验证的 `ssh-keyscan` 输出。
+
+服务器安装 `/usr/local/sbin/finevent-release` 固定入口及 `/usr/local/lib/finevent-release/` 控制器，将新公钥以 `restrict,command=...` 追加到 root 的 `authorized_keys`，保留既有登录密钥和备份。该密钥不能用于通用 shell、SCP、PTY 或端口转发；产物通过固定入口上传。控制器会运行部署包内的安装代码，因此它仍是具有 root 发布权限的凭据，必须作为生产 Secret 管理。初始化不部署应用、不修改数据库、不重启服务；末尾通过专用密钥执行只读预检。首次装机及首次 AI 密钥录入保持独立交互流程。
+
+本地日历/新闻发布和 Actions 共用 `release-client.py` 与服务器控制器。默认使用上述凭据文件，也可指定 `FINEVENT_SSH_KEY_FILE`、`FINEVENT_KNOWN_HOSTS_FILE`。服务器在执行前校验压缩包及文件摘要、前序验收，并持久保存操作和不可变发布包；本地与 Actions 共享注册锁及原有后台观察锁。相同 ID、内容和选项只返回已有状态；内容变化拒绝复用该 ID。启动结果不明或观察进程异常退出时保留 `needs_recovery`，需检查服务器证据，不自动重发安装。
+
+GitHub 的 `production` environment 仅允许 `main` 分支，配置三个 environment Secrets：
+
+| Secret                   | 内容              |
+| ------------------------ | ----------------- |
+| `FINEVENT_DEPLOY_CONFIG` | 完整私有部署 JSON |
+| `FINEVENT_SSH_KEY`       | 专用私钥文件内容  |
+| `FINEVENT_KNOWN_HOSTS`   | 已核对的主机记录  |
+
+手动运行 **Deploy**，提供成功的 main push **CI** 运行 ID、已审核的最新服务器操作 ID，以及 calendar 或 news 验证范围。流程核对同仓库、CI workflow、main 历史、artifact 来源与 GitHub 摘要、包摘要和干净提交 SHA，再临时渲染私有包并启动服务器观察；PR 产物、其他 workflow、过期产物或不匹配 SHA 均拒绝。生产 Deploy 串行且不取消正在执行的部署。`Re-run jobs` 保持相同操作 ID；重新 dispatch 是新操作，不能用来重试结果不明的安装。AI 付费验证不在 Actions 选项中。
+
+手动运行 **Report**，填写具体操作 ID 或 `latest`。它仅查询既有报告，不启动安装、采集或模型调用；日志和摘要不包含完整服务器报告、地址及路径。本地 `publish-calendar.ps1 -Report -RunId <操作ID>` 可将完整私有报告下载到 `.validation/<操作ID>/report.json`，不依赖原发布电脑的指针。后台观察超出 job 生命周期，绿色的启动/查询 job 不代表生产验收完成。服务器保留完整报告、备份、回滚依据和控制器私有日志；恢复前核对当前状态。
+
+TODO: 第二批首次服务器初始化、真实 Actions Deploy/Report、生产页面/PWA 与旧深链接，以及长时观察和真机通知仍须完成验收；实现和离线测试通过不能替代这些结果。
 
 ### 原验证版安装与共用机制
 
