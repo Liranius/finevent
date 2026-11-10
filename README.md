@@ -375,7 +375,7 @@ Nginx 重载后，每个 HTTPS 入口最多检查六次，失败间隔一秒；�
 
 所有必要步骤（包括通用包构建、渲染回归及上传）成功后才通过 PR 的 `Quality` 汇总检查；主分支及手动运行显示 `CI result`。通用包以 `finevent-linux-amd64-<检出SHA>` 命名，作为 Actions artifact 保留 14 天；失败浏览器报告保留 7 天。只上传 `release/generic/` 的压缩包与摘要，本地渲染包和 `.validation/` 不上传。Actions 固定提交 SHA，Dependabot 每周检查其更新；过期运行自动取消。Lint warning 沿用基线默认行为，不额外阻断。
 
-`main` 已配置分支保护：通过 PR 合入，要求分支与主分支同步、GitHub Actions 提供的 `Quality` 成功；管理员同样受约束，禁止强推及删除，仓库仅允许 rebase merge。个人仓库不额外要求他人审批。平台配置与真实检查的验收入口为 PR #1；本地检查不能替代 PR 最新提交的远端结果。
+`main` 已配置分支保护：通过 PR 合入，要求分支与主分支同步、GitHub Actions 提供的 `Quality` 成功；管理员同样受约束，禁止强推及删除，仓库仅允许 rebase merge。个人仓库不额外要求他人审批。平台配置与仓库重建记录见 [实施状态](docs/implementation-status.md#github-仓库重建)；本地检查不能替代 PR 最新提交的远端结果。
 
 ## 项目知识
 
