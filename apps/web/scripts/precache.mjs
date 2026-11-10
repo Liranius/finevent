@@ -60,10 +60,17 @@ const files = [
 ];
 const hash = createHash('sha256');
 for (const file of files) hash.update(await readFile(`dist/${file}`));
+const version = hash.digest('hex').slice(0, 16);
 await writeFile(
   'dist/precache.json',
   JSON.stringify({
-    version: hash.digest('hex').slice(0, 16),
+    version,
     urls: files.map((file) => `/finevent/${file}`),
   }),
 );
+// Browsers detect worker updates by script bytes, not by the fetched precache manifest.
+const worker = (await readFile('dist/sw.js', 'utf8')).replace(
+  /^\/\/ finevent-precache-version: [a-f0-9]{16}\r?\n/,
+  '',
+);
+await writeFile('dist/sw.js', `// finevent-precache-version: ${version}\n${worker}`);

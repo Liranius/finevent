@@ -86,6 +86,8 @@ pnpm test:e2e:all
 
 离线用例另起专用服务，在停止源站后验证真实缓存回退；WebKit 离线模拟器的已知限制及恢复条件见 [测试旁的 TODO](e2e/workspace.spec.ts)。
 
+构建将离线资源清单的内容版本写入 `sw.js`，使应用资源变化也能触发浏览器的 [Service Worker 更新检测](https://web.dev/learn/pwa/service-workers)。相同内容重复构建保持一致；已有 PWA 通过“更新应用”切换缓存，浏览器回归覆盖从旧 Worker 更新后断网加载新版。
+
 一次真实来源连通性检查可显式设置 `FINEVENT_LIVE_TEST=1` 后运行 `go -C apps/server test ./internal/probe -run TestLiveWallstreet -v`。该检查不证明两个交易日的时效。
 
 ## 部署验证服务

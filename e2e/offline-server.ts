@@ -4,7 +4,10 @@ import { createServer } from 'node:net';
 import { resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 
-export async function startOfflineServer(projectURL: string | undefined) {
+export async function startOfflineServer(
+  projectURL: string | undefined,
+  webRoot = 'apps/web/dist',
+) {
   if (!projectURL) throw new Error('Missing project base URL');
   const reservation = createServer();
   await new Promise<void>((ready, reject) => {
@@ -25,7 +28,7 @@ export async function startOfflineServer(projectURL: string | undefined) {
     [
       '-dev',
       '-web',
-      'apps/web/dist',
+      webRoot,
       '-data',
       `.validation/offline-${randomUUID()}`,
       '-listen',

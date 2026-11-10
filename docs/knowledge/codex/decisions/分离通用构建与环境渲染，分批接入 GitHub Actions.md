@@ -29,6 +29,9 @@ sources:
   - deploy/release_control.py
   - deploy/test_actions_release.py
   - deploy/test_release_control.py
+  - apps/web/scripts/precache.mjs
+  - tests/precache.test.ts
+  - e2e/pwa-update.spec.ts
 ---
 
 # 分离通用构建与环境渲染，分批接入 GitHub Actions
@@ -40,6 +43,8 @@ sources:
 CI 对真实 PR 的合并结果执行完整检查，通用包构建、渲染回归和上传也属于 Quality 的必要步骤。GitHub 主分支要求来自 GitHub Actions 的 Quality 成功及分支同步，管理员同样遵守；合并方式采用 rebase。个人仓库不额外要求他人审批。平台实际状态与验收证据需从仓库和 PR 核对，不能仅凭此决策或本地测试推定门禁已经生效。
 
 采用共用脚本能同时支持本地和 Actions，避免维护两套构建流程；以明确源码身份和摘要关联产物，便于下载后在本地发布。代价是多一次显式渲染，通用包与部署包需分别保存。没有选择直接上传本地私有发布包，也没有在第一批开启推送即生产部署。
+
+PWA 的离线资源清单变化本身不会触发 Worker 更新。通用构建将资源内容版本写入 Worker 脚本，既使浏览器能发现新包，又保持相同内容的重复构建一致；更新确认和离线加载通过真实浏览器回归核对。说明和平台依据见 README。
 
 用户随后授权推进第二批，并确认没有现成 SSH 密钥或登录会话，由本机终端输入现有密码执行一次性初始化。服务器操作记录成为权威来源，本地指针仅作缓存；本地和 Actions 复用控制器、前序验收及锁。专用 SSH 密钥限制为固定发布命令，仍具有运行安装代码所需的 root 发布权限。首次装机与 AI 密钥初始化保持独立交互入口。
 
