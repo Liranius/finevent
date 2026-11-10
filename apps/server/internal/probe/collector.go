@@ -2,12 +2,14 @@ package probe
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -35,34 +37,91 @@ type wallResponse struct {
 }
 
 func FetchWallstreet(ctx context.Context, client *http.Client, address string) ([]Item, error) {
+	items, _, err := fetchWallstreet(ctx, client, address)
+	return items, err
+}
+
+func sourceNetworkError(ctx context.Context, err error, fallback string) string {
+	if errors.Is(ctx.Err(), context.Canceled) {
+		return "cancelled"
+	}
+	var networkError net.Error
+	if errors.As(err, &networkError) && networkError.Timeout() {
+		return "timeout"
+	}
+	return fallback
+}
+
+func sourceRetryAfter(raw string, now time.Time) int64 {
+	if seconds, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64); err == nil && seconds >= 0 {
+		// Reject overflowing timestamps instead of wrapping them into an immediate retry.
+		if seconds <= (1<<63-1)-now.Unix() {
+			return now.Unix() + seconds
+		}
+	}
+	if at, err := http.ParseTime(raw); err == nil && at.After(now) {
+		return at.Unix()
+	}
+	return 0
+}
+
+func fetchWallstreet(ctx context.Context, client *http.Client, address string) (items []Item, window SourceWindow, err error) {
+	window.StartedMS = time.Now().UnixMilli()
+	window.Items = []ObservedItem{}
+	defer func() { window.CompletedMS = time.Now().UnixMilli() }()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address, nil)
 	if err != nil {
-		return nil, err
+		window.ErrorKind = "request"
+		return nil, window, err
 	}
+	window.Cursor, _ = strconv.ParseInt(req.URL.Query().Get("cursor"), 10, 64)
 	req.Header.Set("User-Agent", "finevent/0.1 personal-source-observer")
 	res, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		window.ErrorKind = sourceNetworkError(ctx, err, "network")
+		return nil, window, err
 	}
 	defer res.Body.Close()
+	window.HTTPStatus = res.StatusCode
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("source HTTP %d", res.StatusCode)
+		window.ErrorKind = "http"
+		if res.StatusCode == http.StatusTooManyRequests {
+			window.ErrorKind = "rate_limit"
+		} else if res.StatusCode >= 500 {
+			window.ErrorKind = "server"
+		}
+		if res.StatusCode == http.StatusTooManyRequests || res.StatusCode == http.StatusServiceUnavailable {
+			window.RetryAfter = sourceRetryAfter(res.Header.Get("Retry-After"), time.Now())
+		}
+		return nil, window, fmt.Errorf("source HTTP %d", res.StatusCode)
 	}
 	body, err := io.ReadAll(io.LimitReader(res.Body, 4*1024*1024+1))
+	window.BodyBytes = len(body)
+	window.BodySHA256 = fmt.Sprintf("%x", sha256.Sum256(body))
 	if err != nil {
-		return nil, err
+		window.ErrorKind = sourceNetworkError(ctx, err, "body_read")
+		return nil, window, err
 	}
 	if len(body) > 4*1024*1024 {
-		return nil, errors.New("source response exceeds 4 MiB")
+		window.ErrorKind = "oversized"
+		return nil, window, errors.New("source response exceeds 4 MiB")
 	}
+	window.BodyComplete = true
 	var payload wallResponse
 	if err = json.Unmarshal(body, &payload); err != nil {
-		return nil, err
+		window.ErrorKind = "invalid_json"
+		return nil, window, err
+	}
+	window.ItemCount = len(payload.Data.Items)
+	window.ItemsTruncated = window.ItemCount > 100
+	for _, raw := range payload.Data.Items[:min(100, window.ItemCount)] {
+		window.Items = append(window.Items, ObservedItem{ID: raw.ID, PublishedAt: raw.DisplayTime})
 	}
 	if len(payload.Data.Items) == 0 {
-		return nil, errors.New("empty source window; source availability unconfirmed")
+		window.ErrorKind = "empty"
+		return nil, window, errors.New("empty source window; source availability unconfirmed")
 	}
-	items := []Item{}
+	items = []Item{}
 	for _, raw := range payload.Data.Items {
 		content := strings.TrimSpace(html.UnescapeString(tags.ReplaceAllString(raw.Content, "")))
 		title := strings.TrimSpace(raw.Title)
@@ -78,15 +137,17 @@ func FetchWallstreet(ctx context.Context, client *http.Client, address string) (
 		items = append(items, Item{Source: "wallstreetcn", SourceID: strconv.FormatInt(raw.ID, 10), Title: title, Content: content, URL: raw.URI, PublishedAt: raw.DisplayTime})
 	}
 	if len(items) == 0 {
-		return nil, errors.New("no valid source items")
+		window.ErrorKind = "invalid_items"
+		return nil, window, errors.New("no valid source items")
 	}
-	return items, nil
+	return items, window, nil
 }
 
 func (a *App) CollectWallstreet(ctx context.Context, address string) Poll {
 	now := time.Now()
 	p := Poll{Source: "wallstreetcn", Started: now.Unix()}
-	items, err := FetchWallstreet(ctx, a.Client, address)
+	items, window, err := fetchWallstreet(ctx, a.Client, address)
+	p.Requests = append(p.Requests, window)
 	if err != nil {
 		p.Completed = time.Now().Unix()
 		p.Error = err.Error()
@@ -127,7 +188,8 @@ func (a *App) CollectWallstreet(ctx context.Context, address string) Poll {
 			q := u.Query()
 			q.Set("cursor", strconv.FormatInt(oldest.PublishedAt, 10))
 			u.RawQuery = q.Encode()
-			more, e := FetchWallstreet(ctx, a.Client, u.String())
+			more, window, e := fetchWallstreet(ctx, a.Client, u.String())
+			p.Requests = append(p.Requests, window)
 			if e != nil {
 				p.Gap = "采集窗口无重叠，补采失败"
 				break

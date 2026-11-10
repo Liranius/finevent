@@ -95,6 +95,7 @@ func (a *App) Handler() http.Handler {
 	m.HandleFunc("POST "+prefix+"login", a.login)
 	m.HandleFunc("POST "+prefix+"logout", a.logout)
 	m.HandleFunc("GET "+prefix+"status", a.status)
+	m.HandleFunc("GET "+prefix+"news/collection", a.collectionHistory)
 	m.HandleFunc("POST "+prefix+"push/subscriptions", a.subscribe)
 	m.HandleFunc("DELETE "+prefix+"push/subscriptions/{id}", a.unsubscribe)
 	m.HandleFunc("POST "+prefix+"push/tests", a.queueTest)

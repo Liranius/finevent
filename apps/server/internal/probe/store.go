@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS ai_probe_timings(id TEXT PRIMARY KEY REFERENCES ai_pr
 		db.Close()
 		return nil, err
 	}
+	if err = initCollectionEvidence(db); err != nil {
+		db.Close()
+		return nil, err
+	}
 	// A process can die after claiming a delivery. Receivers deduplicate using its stable ID.
 	if _, err = db.Exec(`UPDATE deliveries SET status='queued' WHERE status='sending'`); err != nil {
 		db.Close()
@@ -91,14 +95,15 @@ type Item struct {
 	SourceObservedAt int64  `json:"source_observed_at"`
 }
 type Poll struct {
-	Source    string `json:"source"`
-	Started   int64  `json:"started"`
-	Completed int64  `json:"completed"`
-	Success   bool   `json:"success"`
-	Added     int    `json:"added"`
-	Changed   int    `json:"changed"`
-	Gap       string `json:"gap"`
-	Error     string `json:"error"`
+	Source    string         `json:"source"`
+	Started   int64          `json:"started"`
+	Completed int64          `json:"completed"`
+	Success   bool           `json:"success"`
+	Added     int            `json:"added"`
+	Changed   int            `json:"changed"`
+	Gap       string         `json:"gap"`
+	Error     string         `json:"error"`
+	Requests  []SourceWindow `json:"-"`
 }
 
 func CanonicalURL(raw string) string {
@@ -173,11 +178,6 @@ func (s *Store) SaveItems(items []Item, now int64) (int, int, error) {
 	return added, changed, tx.Commit()
 }
 
-func (s *Store) SavePoll(p Poll) error {
-	_, err := s.DB.Exec(`INSERT INTO polls(source,started,completed,success,added,changed,gap,error) VALUES(?,?,?,?,?,?,?,?)`, p.Source, p.Started, p.Completed, p.Success, p.Added, p.Changed, p.Gap, p.Error)
-	return err
-}
-
 type Latency struct {
 	Source      string  `json:"source"`
 	Samples     int     `json:"samples"`
@@ -189,7 +189,11 @@ type Latency struct {
 }
 
 func (s *Store) Latencies(since int64) ([]Latency, error) {
-	rows, err := s.DB.Query(`SELECT source,published_at,first_seen FROM news WHERE first_seen>=? AND baseline=0 ORDER BY source LIMIT 50000`, since)
+	// Use the publication time actually seen on first discovery. Later source edits
+	// must not rewrite historical latency; legacy revisions without evidence stay unknown.
+	rows, err := s.DB.Query(`SELECT n.source,CASE WHEN n.version=1 THEN n.published_at ELSE COALESCE(e.published_at,0) END,n.first_seen
+FROM news n LEFT JOIN news_revision_evidence e ON e.news_id=n.id AND e.version=1
+WHERE n.first_seen>=? AND n.baseline=0 ORDER BY n.source LIMIT 50000`, since)
 	if err != nil {
 		return nil, err
 	}
@@ -248,6 +252,7 @@ func (s *Store) Prune(now time.Time) error {
 		{`DELETE FROM news WHERE last_seen<?`, now.AddDate(0, 0, -90).Unix()},
 		{`DELETE FROM news_changes WHERE changed_at<?`, now.AddDate(0, 0, -90).Unix()},
 		{`DELETE FROM polls WHERE completed<?`, now.AddDate(0, 0, -30).Unix()},
+		{`DELETE FROM poll_requests WHERE poll_id IN (SELECT id FROM polls WHERE completed<?)`, now.AddDate(0, 0, -7).Unix()},
 		{`DELETE FROM trend_health_cycles WHERE at<?`, now.AddDate(0, 0, -30).Unix()},
 		{`DELETE FROM resources WHERE at<?`, now.AddDate(0, 0, -7).Unix()},
 		{`DELETE FROM ai_jobs WHERE expires<? AND status<>'running'`, now.Unix()},

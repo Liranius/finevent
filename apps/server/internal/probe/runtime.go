@@ -55,6 +55,9 @@ func (a *App) SampleResources() error {
 }
 
 func (a *App) due(source string, interval time.Duration) bool {
+	if source == "wallstreetcn" {
+		return a.Store.wallstreetDue(time.Now(), interval)
+	}
 	var completed int64
 	var ok bool
 	err := a.Store.DB.QueryRow(`SELECT completed,success FROM polls WHERE source=? ORDER BY id DESC LIMIT 1`, source).Scan(&completed, &ok)
