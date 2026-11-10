@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { cp, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { cp, readFile, rm, unlink, utimes, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import { expect, test } from '@playwright/test';
@@ -21,6 +21,12 @@ test('已有 PWA 能发现资源更新，确认后离线加载新版', async ({
   await cp('apps/web/dist', webRoot, { recursive: true });
   // Start with the previously shipped worker, which has no build version stamp.
   await cp('apps/web/public/sw.js', resolve(webRoot, 'sw.js'));
+  // Model separate releases: HTTP modification dates have one-second precision,
+  // while this fixture can copy and replace its files within the same second.
+  const previousRelease = new Date(Math.floor(Date.now() / 1000) * 1000 - 60000);
+  for (const name of ['sw.js', 'index.html', 'precache.json']) {
+    await utimes(resolve(webRoot, name), previousRelease, previousRelease);
+  }
   const server = await startOfflineServer(baseURL, webRoot);
   try {
     await page.goto(server.url);
@@ -47,6 +53,11 @@ test('已有 PWA 能发现资源更新，确认后离线加载新版', async ({
       encoding: 'utf8',
     });
     expect({ status: build.status, stderr: build.stderr }).toEqual({ status: 0, stderr: '' });
+
+    const conditional = await page.request.get(`${server.url}sw.js`, {
+      headers: { 'If-Modified-Since': previousRelease.toUTCString() },
+    });
+    expect(conditional.status(), 'The new release must pass HTTP revalidation').toBe(200);
 
     await page.evaluate(async () => (await navigator.serviceWorker.ready).update());
     await expect(page.getByRole('button', { name: '更新应用', exact: true })).toBeVisible();
