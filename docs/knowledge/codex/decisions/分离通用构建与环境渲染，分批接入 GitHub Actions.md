@@ -50,7 +50,7 @@ PWA 的离线资源清单变化本身不会触发 Worker 更新。通用构建�
 
 Deploy 只选取同仓库 main push CI 的成功产物，核对 GitHub artifact 来源和摘要、包摘要及干净提交身份。操作 ID 绑定内容和前序参数，Actions 重新运行沿用同一 ID；响应丢失时查询既有操作，结果不明不自动重新安装。私有环境仅在临时渲染和服务器内使用，公开 Report 保留状态摘要，完整报告由本地入口下载到忽略目录。
 
-第二批继续复用服务器备份、回滚和后台观察，不能把任务启动当成验收通过。日历完整观察长于 [GitHub 托管单个 job 上限](https://docs.github.com/en/actions/reference/limits)。主要 TODO 由 README 的“SSH 初始化与 Actions 部署”维护，本记录不重复维护执行状态。
+第二批继续复用服务器备份、回滚和后台观察，不能把任务启动当成验收通过。日历完整观察长于 [GitHub 托管单个 job 上限](https://docs.github.com/en/actions/reference/limits)。操作入口由 README 的“SSH 初始化与 Actions 部署”维护，实际结果与验收边界见实施状态文档；本记录不重复维护执行状态。
 
 ## Observations
 
