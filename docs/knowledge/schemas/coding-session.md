@@ -2,7 +2,7 @@
 title: Coding Session
 type: schema
 entity: CodingSession
-version: 1
+version: 2
 schema:
   summary?: string, one-paragraph what happened in this coding session
   changed_file?(array): string, files created, edited, deleted, or inspected
@@ -17,8 +17,6 @@ settings:
     project: string, the Basic Memory project this session belongs to
     started: string, when the session began or checkpoint was created
     repository: string, stable repository identifier such as owner/name
-    repo_root: string, Git repository root for this checkout
-    cwd: string, working directory for the session
     branch: string, checked-out Git branch or HEAD when detached
     git_sha: string, exact Git commit at checkpoint time
     ended?: string, when the session was checkpointed
@@ -35,16 +33,7 @@ settings:
       - merged
     pull_request_base?: string, pull request base branch
     pull_request_head?: string, pull request head branch
-    username?: string, operating-system user that created the checkpoint
-    hostname?: string, host that created the checkpoint
-    session_id?: string, exact host-provided session identifier (pair with agent)
     agent?: string, agent harness identifier such as tau or claude-code or codex
-    tau_session_id?: string, legacy Tau session identifier (read compatibility only)
-    claude_session_id?: string, legacy Claude Code session identifier (read compatibility
-      only)
-    codex_session_id?: string, legacy Codex session identifier (read compatibility
-      only)
-    codex_turn_id?: string, Codex turn identifier
     trigger?: string, compaction trigger or deliberate checkpoint source
     model?: string, active model slug when known
     capture?(enum, how this checkpoint was produced):
@@ -60,6 +49,7 @@ Source: Basic Machines / Basic Memory, https://github.com/basicmachines-co/basic
 Modified for Liranius/vue-baseline on 2026-10-29: added the project permalink and normalized formatting.
 2026-10-30: added this provenance and modification notice; schema semantics and original prose are unchanged.
 2026-11-05: adapted the project permalink for finevent; schema semantics are unchanged.
+2026-11-11: removed workstation and chat identifiers from the project checkpoint format.
 License: LICENSE in this directory. See ../../../THIRD_PARTY_NOTICES.md for scope.
 -->
 
@@ -75,13 +65,8 @@ Examples:
 
 `search_notes(note_types=["coding_session"], metadata_filters={"pull_request_number": "123"})`
 
-`search_notes(note_types=["coding_session"], metadata_filters={"agent": "codex", "session_id": "<id>"})`
-
 Pull-request fields are optional because valid coding work can precede a pull
 request. When a pull request exists, checkpoint writers populate the complete
-pull-request field set. Multiple checkpoints from one agent chat share the
-`agent` and `session_id` pair; session IDs alone are not cross-agent identity.
-Each new checkpoint can link to its verified predecessor with
-`continues [[Previous checkpoint title]]`. New writers use the shared fields.
-Legacy agent-specific session fields remain accepted for existing notes; do not
-rewrite old checkpoints or infer missing session IDs.
+pull-request field set. A checkpoint can link to an explicitly identified
+predecessor with `continues [[Previous checkpoint title]]`. Use its permalink
+to resume work across checkouts.

@@ -261,6 +261,24 @@ async function checkMcp(ctx) {
   }
 }
 
+export function portableCheckpointBrief(brief) {
+  // Basic Memory 0.24.1 puts its private checkpoint request on the first line.
+  // Keep the project context and replace the entire request, including its payload.
+  return brief.replace(
+    /^Basic Memory checkpoint required after compaction\.[^\r\n]*/,
+    'Use the project bm-checkpoint skill to save this handoff. Include repository-relative paths and Git references. Omit workstation paths, OS usernames, hostnames, and chat or turn IDs from metadata, prose, and links.',
+  );
+}
+
+function sessionStart(ctx, input) {
+  const brief = runSync(ctx, ctx.executable, ['hook', 'session-start', '--harness', 'codex'], {
+    input,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 30000,
+  });
+  return portableCheckpointBrief(brief);
+}
+
 async function doctor(ctx) {
   requireRuntime(ctx);
   const toolCount = await checkMcp(ctx);
@@ -270,11 +288,7 @@ async function doctor(ctx) {
     cwd: ctx.root,
     source: 'startup',
   });
-  const output = runSync(ctx, ctx.executable, ['hook', 'session-start', '--harness', 'codex'], {
-    input,
-    stdio: ['pipe', 'pipe', 'pipe'],
-    timeout: 30000,
-  });
+  const output = sessionStart(ctx, input);
   // The official Codex CLI hook emits Markdown on stdout, not a JSON envelope.
   if (!output.includes('# Basic Memory') || !output.includes(ctx.project))
     throw new Error('SessionStart returned no project context.');
@@ -304,7 +318,8 @@ export async function main(args = process.argv.slice(2)) {
     const payload = JSON.parse(input);
     const ctx = bind(payload.cwd ?? process.cwd());
     requireRuntime(ctx);
-    await relay(ctx, ['hook', rest[0], '--harness', 'codex'], input);
+    if (rest[0] === 'session-start') process.stdout.write(sessionStart(ctx, input));
+    else await relay(ctx, ['hook', rest[0], '--harness', 'codex'], input);
     return;
   }
   const ctx = bind(process.cwd());

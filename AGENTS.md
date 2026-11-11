@@ -18,7 +18,8 @@
 
 - Basic Memory 的安装、诊断和目录规则见 [项目知识接入](docs/project-knowledge.md)。使用项目 MCP；CLI 操作通过 `pnpm knowledge:cli`，不要直接使用全局 `bm` 或复制其他 worktree 的配置与数据库。
 - 实质开发、修复和工程约定调整使用项目内的 [project-knowledge](.agents/skills/project-knowledge/SKILL.md)：开始时按需检索，收尾时检查变更关联知识并按需维护；只读问答只检索和核对。
-- 沿用仓库中的官方 `bm-*` 技能按需收录、读取和恢复知识。以当前代码、配置和已确认要求为准；既有 README、AGENTS.md 和 DESIGN.md 保持各自的维护入口，笔记引用来源。
+- 知识笔记仅用仓库相对路径，元数据、正文和链接均省略本机绝对路径、操作系统用户名、主机名、会话及轮次 ID。交接使用仓库、分支、提交及笔记 permalink 定位。
+- 沿用仓库中的 `bm-*` 技能按需收录、读取和恢复知识。以当前代码、配置和已确认要求为准；既有 README、AGENTS.md 和 DESIGN.md 保持各自的维护入口，笔记引用来源。
 
 ## UI 工作
 

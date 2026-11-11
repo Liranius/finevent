@@ -9,6 +9,8 @@ Create a durable, immutable handoff note for current Codex work. Use this when
 the user asks to checkpoint, wrap up, hand off, remember the work state, or when
 the post-compaction SessionStart context requests the deliberate handoff.
 
+Project adaptation, 2026-11-11: write portable checkpoints without workstation or chat identifiers.
+
 ## Gather
 
 Read `~/.codex/basic-memory.json`, then the nearest project
@@ -32,7 +34,6 @@ Gather repo evidence:
 - tradeoffs, sharp edges, useful simplifications, and intentionally parked work
 - `git status --short`
 - current branch
-- repository root and current working directory
 - current Git SHA
 - current pull request number, title, URL, state, base, and head when one exists
 - changed files you touched
@@ -41,16 +42,12 @@ Gather repo evidence:
 - decisions made in this thread
 - unresolved blockers
 - next action
-- current username, hostname, and timestamp
-- host-provided `session_id`, `agent`, `codex_turn_id`, `trigger`, and `model`
-  values from the checkpoint request, when present
+- UTC timestamp and optional agent, trigger, and model labels
 
-Use direct, read-only evidence for repository and pull-request state. Do not
-claim a test passed unless you ran it or the user supplied the result.
-Treat host-provided session metadata as opaque identity data. Preserve exact
-non-empty values; never infer or rewrite them. For older requests supplying only
-`codex_session_id`, use that exact value as `session_id` with `agent: codex`.
-Do not emit the legacy field on new checkpoints.
+Use direct, read-only evidence for repository and pull-request state. Confirm
+tests from their results. Keep machine paths, OS usernames, hostnames, chat
+and turn identifiers out of the entire note, including metadata, prose, links,
+and tool arguments that will be persisted. Use repository-relative file paths.
 
 ## Write
 
@@ -91,14 +88,9 @@ Write a note to Basic Memory. For the `general` profile:
   - `type: codex_session`
   - `status: open`
   - `project: <primaryProject if known>`
-  - `cwd: <current cwd>`
   - `started: <current timestamp>`
-  - `username: <current username>`
-  - `hostname: <current hostname>`
   - `capture: deliberate`
   - `agent: codex`
-  - `session_id: <host-provided Codex session id>`, when supplied
-  - `codex_turn_id: <host-provided Codex turn id>`, when supplied
   - `trigger: <host-provided checkpoint trigger>`, when supplied
   - `model: <host-provided model slug>`, when supplied
 
@@ -106,8 +98,6 @@ For the `coding` profile, write `type: coding_session` and use the same common
 frontmatter plus these schema-required fields:
 
 - `repository: <confirmed stable repository identifier>`
-- `repo_root: <git rev-parse --show-toplevel>`
-- `cwd: <current cwd>`
 - `branch: <git rev-parse --abbrev-ref HEAD>`
 - `git_sha: <git rev-parse HEAD>`
 
@@ -120,26 +110,13 @@ so exact metadata queries behave consistently across storage backends.
 Never infer or copy repository/PR identity only from conversation text. Stop if
 the required coding fields cannot be proven.
 
-### Link Checkpoints From The Same Chat
+### Link A Known Predecessor
 
-When `session_id` is available, pair it with `agent: codex` for same-chat identity:
-
-1. Before writing, search the configured `primaryProject` for both
-   `codex_session` and `coding_session` notes with
-   `metadata_filters={"agent": "codex", "session_id": "<exact host-provided id>"}`.
-   Also search legacy notes with
-   `metadata_filters={"codex_session_id": "<exact host-provided id>"}`.
-2. Page through both searches, deduplicate, and select the newest earlier
-   checkpoint by its valid `started` timestamp. Read it directly from
-   `primaryProject`. Confirm the exact `agent`/`session_id` pair, or the exact
-   legacy `codex_session_id` when shared identity is absent. Reject conflicting
-   agent/session fields; a bare session ID is never cross-agent identity.
-3. Add `- continues [[Exact previous checkpoint title]]` under `## Relations`.
-
-Do not edit the previous immutable checkpoint to add a forward edge; Basic
-Memory backlinks make the chain navigable in both directions. If there is no
-verified earlier match, omit the lineage relation. Never infer same-chat lineage
-from repository, branch, topic, timestamps alone, or lifecycle envelope notes.
+When the user or the current conversation identifies a preceding checkpoint
+by its exact title or permalink, read it in the configured project and add
+`- continues [[Exact previous checkpoint title]]` under `## Relations`.
+Omit the relation when there is no explicit predecessor. Keep earlier notes
+unchanged.
 
 Begin the body with `# <exact note title>`.
 
@@ -156,8 +133,7 @@ Use these sections, omitting optional ones that add no value:
 - `## Observations`
 - `## Relations`, when the thread has an obvious graph target
 
-Prefer repository-relative paths in the body. Required absolute `repo_root` and
-`cwd` frontmatter remain machine-local evidence. Label dirty or untracked files,
+Use repository-relative paths. Label dirty or untracked files,
 ignored files, active processes, dev servers, temporary directories, and local
 tool caches as machine-local or fragile when they matter to resumption. Do not
 present them as durable project state.
@@ -198,7 +174,7 @@ Relations are not observations. Put them under `## Relations` using Basic
 Memory relation syntax, for example `- relates_to [[Exact existing note title]]`.
 Never write `[relates_to]` or a bare `memory://` URL as an observation. Only add
 a relation when its target is an existing checkpoint, task, decision, spec,
-issue, or PR note. The verified same-chat `continues` edge is the checkpoint
+issue, or PR note. The verified `continues` edge is the checkpoint
 lineage relation; do not add a second generic relation to that same target.
 
 ## Confirm

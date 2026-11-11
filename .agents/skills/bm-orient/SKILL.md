@@ -9,6 +9,8 @@ Use this before substantial work in a repo, before resuming an old thread, or wh
 the user asks where things stand. Accept an optional Basic Memory identifier,
 permalink, or topic after `$bm-orient`.
 
+Project adaptation, 2026-11-11: use portable Git evidence when resuming a checkpoint.
+
 ## Resolve Configuration
 
 Read `~/.codex/basic-memory.json`, then the nearest project
@@ -90,7 +92,7 @@ The current user request, current repository instructions, and live read-only
 state are authoritative.
 
 For a `coding_session`, compare the checkpoint's structured `repository`,
-`repo_root`, `cwd`, `branch`, `git_sha`, and pull-request fields with live
+`branch`, `git_sha`, and pull-request fields with live
 read-only evidence. Also check whether checkpointed changed files still exist
 and whether current tasks or decisions supersede the snapshot.
 
@@ -99,8 +101,6 @@ Report material drift explicitly:
 - same repository and SHA: the checkpoint cursor still matches the checkout
 - same repository but different branch, SHA, pull request, or file state:
   explain the difference before proposing the next action
-- different local root or cwd: label it as machine-local drift; do not call it
-  a repository mismatch when the stable repository identity still matches
 - missing repository or required Git evidence: say which comparison cannot be
   proven
 

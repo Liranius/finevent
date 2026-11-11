@@ -192,6 +192,34 @@ describe('knowledge impact checks', () => {
     expect(result.historicalSkipped).toBe(3);
   });
 
+  it('flags private note fields, local paths and chat links without printing their values', () => {
+    const root = fixture();
+    note(root, '会话', [], 'codex_turn_id: private-turn\n');
+    note(root, '路径', [], '', 'See C:\\Users\\private-account\\repo');
+    note(root, '聊天', [], '', 'codex://threads/private-chat');
+    note(root, '可恢复', [], '', 'Open docs/knowledge/codex/checkpoints or a GitHub PR.');
+    const result = checkKnowledge(root);
+    expect(result.warnings.total).toBe(3);
+    expect(result.complete).toBe(false);
+    expect(JSON.stringify(result.warnings)).not.toMatch(
+      /private-turn|private-account|private-chat/,
+    );
+  });
+
+  it('checks the repository knowledge notes that will go through Git review', () => {
+    const root = fileURLToPath(new URL('..', import.meta.url));
+    let offset: number | null = 0;
+    do {
+      const { warnings } = checkKnowledge(root, { limit: 50, offset });
+      expect(
+        warnings.items.filter(({ message }) =>
+          message.startsWith('Note contains workstation or chat metadata'),
+        ),
+      ).toEqual([]);
+      offset = warnings.nextOffset;
+    } while (offset !== null);
+  });
+
   it('reports missing associations and malformed frontmatter without claiming a complete check', () => {
     const root = fixture();
     note(root, '未关联');

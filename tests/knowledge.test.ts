@@ -88,6 +88,21 @@ afterEach(() => {
   }
 });
 
+describe('portable project notes', () => {
+  it('removes the private compact request and preserves the project context', async () => {
+    const { portableCheckpointBrief }: { portableCheckpointBrief: (brief: string) => string } =
+      await import(new URL('../scripts/knowledge.mjs', import.meta.url).href);
+    const context = '# Basic Memory\n\nCurrent project knowledge.';
+    const upstream =
+      'Basic Memory checkpoint required after compaction. Host-provided session metadata: {"session_id":"test-session","codex_turn_id":"test-turn"}. Pass these exact values.';
+    const brief = portableCheckpointBrief(`${upstream}\r\n\r\n---\r\n\r\n${context}`);
+    expect(brief).toContain('bm-checkpoint');
+    expect(brief).not.toMatch(/test-session|test-turn|Pass these exact/);
+    expect(brief.endsWith(context)).toBe(true);
+    expect(portableCheckpointBrief(context)).toBe(context);
+  });
+});
+
 describe('repo knowledge binding', () => {
   it('uses the same binding from the worktree root and a nested directory', () => {
     const { root, cache } = fixture();

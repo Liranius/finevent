@@ -79,6 +79,13 @@ function readNotes(root) {
         throw new Error('frontmatter must be a mapping');
       const type = scalar(metadata.type) || 'note';
       if (type === 'schema') continue;
+      const privateField = /^(cwd|repo_root|hostname|username|(?:\w+_)?(?:session|turn)_id)$/i;
+      const privatePath =
+        /(?:\b[a-z]:[\\/]|(?:^|[\s\x60('"=])(?:\/(?:Users|home)\/[^/\s]+\/|\\\\[^\\\s]+\\)|file:\/\/\/|codex:\/\/threads?\/)/im;
+      if (Object.keys(metadata).some((key) => privateField.test(key)) || privatePath.test(text))
+        throw new Error(
+          'Note contains workstation or chat metadata; use repository-relative references.',
+        );
       let sources = [];
       try {
         if (metadata.sources !== undefined && !Array.isArray(metadata.sources))

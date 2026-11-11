@@ -14,7 +14,7 @@
 - [.agents/skills/bm-remember/](.agents/skills/bm-remember/LICENSE)
 - [.agents/skills/bm-checkpoint/](.agents/skills/bm-checkpoint/LICENSE)
 
-2026-11-05 从 vue-baseline 的 `b8564eb` 引入相同上游原文件，仅附加 LICENSE 副本，未修改技能、元数据或图标。
+2026-11-05 从 vue-baseline 的 `b8564eb` 引入相同上游原文件，仅附加 LICENSE 副本。2026-11-11 项目修改了 `bm-checkpoint/SKILL.md` 和 `bm-orient/SKILL.md`，使交接与恢复使用仓库标识和笔记链接，省略工作站与会话标识。
 
 ## Basic Memory 派生 schema
 

@@ -51,7 +51,9 @@ TODO: 本次已验证真实 MCP、SessionStart 和 PreCompact 命令，仍需在
 
 CLI 操作通过 `knowledge:cli` 进入同一绑定环境，不直接使用全局 `bm`。不要同时启用上游全局插件的默认 MCP/hooks，否则会出现第二个未绑定本 worktree 的入口。
 
-官方技能负责按任务收录决策、读取知识和创建 checkpoint。现有 README、AGENTS.md、DESIGN.md 和源码继续作为各自内容的维护入口；知识笔记引用相关来源，避免重复保存配置数值。Markdown 进入普通 diff、格式检查和 PR 审查，数据库与缓存不提交。
+写入 `docs/knowledge/` 的笔记使用仓库相对路径。交接保留仓库、分支、提交和 PR，省略本机绝对路径、操作系统用户名、主机名和聊天会话或轮次标识；这条约定同时适用于元数据、正文和链接。恢复使用笔记的 permalink，已知前序笔记时可用 `continues` 关联。
+
+项目技能负责按任务收录决策、读取知识和创建 checkpoint。现有 README、AGENTS.md、DESIGN.md 和源码继续作为各自内容的维护入口；知识笔记引用相关来源，避免重复保存配置数值。Markdown 进入普通 diff、格式检查和 PR 审查，数据库与缓存不提交。
 
 TODO: 当前已提供变更候选检查和中文字面检索回退，但任意来源的历史代码变化不会无人值守地修复所有知识，中文语义召回质量也未作专项验证。真实试点需验证任务中的收录和维护可靠性，再决定是否需要更强的漂移检测或检索方案；读取时仍核对来源与适用范围。
 
@@ -81,7 +83,7 @@ pnpm knowledge:find 超时 重试 --limit 5
 
 `find` 在当前仓库的知识 Markdown 中做 Unicode 字面包含匹配，多个参数按任一词命中，不解析全文检索的布尔语法。仅返回标题、标识、状态、来源和短摘录；选中候选后再用 MCP 或读取对应文件获取正文。它是有限检索回退，不能替代语义检索。
 
-两者默认每组返回 10 项，可用 `--limit`（1–50）和 `--offset` 分页，输出包含总数和下一页位置。未解析的笔记、非法来源或超过 256 KiB 的文件会进入 `warnings`，并使 `complete=false`。没有候选也不代表所有知识都已核实：检查只覆盖指定变化范围与已记录的来源关系。
+两者默认每组返回 10 项，可用 `--limit`（1–50）和 `--offset` 分页，输出包含总数和下一页位置。未解析的笔记、非法来源或超过 256 KiB 的文件会进入 `warnings`，并使 `complete=false`。含本机路径、机器或会话字段、聊天链接的笔记也会报告警告，单测核对仓库中的笔记。没有候选也不代表所有知识都已核实：检查只覆盖指定变化范围与已记录的来源关系。
 
 知识文件沿用现有格式检查、Git diff 和 PR 审查。当前规则变化时维护现行笔记或建立替代关系，checkpoint 保留当时状态；文档合并不等于方案批准。
 
@@ -89,7 +91,7 @@ pnpm knowledge:find 超时 重试 --limit 5
 
 采用 Codex 项目级 MCP 和 hooks 配置，并由启动器调用官方 `basic-memory mcp` 与 `basic-memory hook`。上游全局插件的默认命令没有本项目的 worktree 绑定，因此这里没有执行用户级 `bm install codex`，也没有修改上游插件源码。
 
-五个官方技能 `bm-orient`、`bm-decide`、`bm-writing`、`bm-remember`、`bm-checkpoint` 来自 [Basic Memory 固定提交](https://github.com/basicmachines-co/basic-memory/tree/1d0e09b6f4876c3f339c30e8dbfcf66e59e2c356/plugins/codex/skills)，保留原文件及各目录中的上游许可证原文（上游声明为 `AGPL-3.0-or-later`）。Oxfmt 只对这五个第三方目录增加例外；项目自身的脚本、配置和文档仍正常检查。schema 基于同版本官方模板，作为项目可维护的笔记格式；其许可证、来源及项目修改记录见 [第三方材料说明](../THIRD_PARTY_NOTICES.md)。
+五个官方技能 `bm-orient`、`bm-decide`、`bm-writing`、`bm-remember`、`bm-checkpoint` 来自 [Basic Memory 固定提交](https://github.com/basicmachines-co/basic-memory/tree/1d0e09b6f4876c3f339c30e8dbfcf66e59e2c356/plugins/codex/skills)，其中交接和恢复技能按项目的隐私约定适配，各目录保留上游许可证原文（上游声明为 `AGPL-3.0-or-later`）。Oxfmt 只对这五个第三方目录增加例外；项目自身的脚本、配置和文档仍正常检查。schema 基于同版本官方模板，作为项目可维护的笔记格式；其许可证、来源及项目修改记录见 [第三方材料说明](../THIRD_PARTY_NOTICES.md)。
 
 2026-11-05 从 vue-baseline 的 `b8564eb` 接入，使用 Basic Memory 0.24.1 和 Python 3.12。Basic Memory 的包版本固定，传递依赖由安装时解析；升级应作为单独工程变更，审查上游技能及运行时变化并复验绑定、失败路径、MCP 和 hooks。
 
