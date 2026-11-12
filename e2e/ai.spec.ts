@@ -179,8 +179,9 @@ test('AI：开关、预算、错误和刷新不覆盖未保存设置，桌面与
   const { state } = await fixtures(page);
   await page.clock.install();
   await login(page);
-  await expect(page.getByRole('heading', { name: 'AI 解读', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'AI 设置与预算', exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: '本月可用 ¥29.8800' })).toBeVisible();
+  await expect(page.getByRole('region', { name: '最近解读任务' })).toHaveCount(0);
   const enabled = page.getByLabel('启用 AI 解读');
   await enabled.focus();
   await page.keyboard.press('Space');
@@ -276,7 +277,8 @@ test('AI：手动排队、引用快照、缺失数值、修订和有意重试', 
       title: item.title,
     },
   ];
-  await page.getByRole('button', { name: 'AI 解读', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: 'AI 解读记录', exact: true }).click();
   await page.getByRole('button', { name: item.title, exact: true }).click();
   await expect(page.locator('#ai-history-heading')).toBeFocused();
   await expect(page.getByRole('heading', { name: '潜在影响 · 模型推断' })).toBeVisible();

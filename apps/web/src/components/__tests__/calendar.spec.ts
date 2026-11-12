@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 
 import {
   beijingDay,
+  calendarEntries,
+  monthAgenda,
+  agendaTime,
   blankEvent,
   eventDays,
   eventTime,
@@ -45,6 +48,32 @@ describe('calendar time semantics', () => {
     expect(eventTime(event)).toContain('20:30');
     event.start = event.end = '2026-11-06T08:30:00-05:00';
     expect(eventTime(event)).toContain('21:30');
+  });
+  it('groups spanning events once at the first visible day and orders instants by Beijing time', () => {
+    const event = { ...blankEvent(), start: '2028-01-30', end: '2028-02-02', id: 'carry' };
+    const later = {
+      ...event,
+      id: 'later',
+      precision: 'minute' as const,
+      start: '2028-02-01T00:30:00-05:00',
+      end: '2028-02-01T00:30:00-05:00',
+    };
+    const early = {
+      ...later,
+      id: 'early',
+      start: '2028-02-01T08:00:00+08:00',
+      end: '2028-02-01T08:00:00+08:00',
+    };
+    const leap = { ...event, id: 'leap', start: '2028-02-29', end: '2028-02-29' };
+    const outside = { ...event, start: '2028-03-01', end: '2028-03-01' };
+    const groups = monthAgenda(calendarEntries([later, leap, outside, event, early]), '2028-02');
+    expect(groups.map((group) => [group.day, group.events.map((item) => item.id)])).toEqual([
+      ['2028-02-01', ['carry', 'early', 'later']],
+      ['2028-02-29', ['leap']],
+    ]);
+    expect(agendaTime(later)).toBe('13:30 · 北京时间');
+    expect(agendaTime(leap)).toBe('仅日期');
+    expect(agendaTime(event)).toContain('2028-01-30 至 2028-02-02');
   });
   it('lays out a full Monday-first leap-month grid', () => {
     const days = monthDays('2028-02');

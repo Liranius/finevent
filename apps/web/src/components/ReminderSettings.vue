@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
+import { computed, onMounted, onUnmounted, ref } from 'vue';
 
 import { api, ApiError, formatTime } from '../api';
 import { reminderState, type ReminderData, type ReminderSettings } from '../reminders';
 
+const props = defineProps<{ recordsOnly?: boolean }>();
+const viewName = computed(() => (props.recordsOnly ? '提醒记录' : '提醒设置'));
 const emit = defineEmits<{ expired: []; devices: []; event: [id: string] }>();
 const data = ref<ReminderData | null>(null);
 const form = ref<ReminderSettings | null>(null);
@@ -17,7 +19,7 @@ async function load(reset = false) {
   const next = await api<ReminderData>('reminders');
   if (disposed) return;
   data.value = next;
-  if (!form.value || reset) {
+  if (!props.recordsOnly && (!form.value || reset)) {
     form.value = structuredClone(next.settings);
     codes.value = next.settings.fund_codes.join('、');
   }
@@ -29,7 +31,8 @@ async function action(work: () => Promise<void>) {
   try {
     await work();
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '提醒设置读取失败';
+    if (disposed) return;
+    error.value = cause instanceof Error ? cause.message : viewName.value + '读取失败';
     if (cause instanceof ApiError && cause.status === 401) emit('expired');
   } finally {
     busy.value = false;
@@ -54,8 +57,9 @@ onMounted(async () => {
   timer = setInterval(() => {
     if (!busy.value && document.visibilityState === 'visible')
       void load().catch((cause: unknown) => {
+        if (disposed) return;
         if (cause instanceof ApiError && cause.status === 401) emit('expired');
-        else error.value = '提醒记录刷新失败，保留当前设置。';
+        else error.value = viewName.value + '刷新失败，保留上次读取的内容。';
       });
   }, 30000);
 });
@@ -66,15 +70,15 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="reminder-workspace" aria-label="日历提醒设置">
+  <section class="reminder-workspace" :aria-label="recordsOnly ? '日历提醒记录' : '日历提醒设置'">
     <p v-if="error" class="message error" role="alert">{{ error }}</p>
     <p v-if="notice" class="message" role="status">{{ notice }}</p>
-    <p v-if="!form" class="empty">
-      {{ busy ? '正在读取提醒设置…' : '暂时无法读取提醒设置。'
-      }}<button v-if="!busy" @click="action(() => load())">重试提醒设置</button>
+    <p v-if="!data" class="empty">
+      {{ busy ? '正在读取' + viewName + '…' : '暂时无法读取' + viewName + '。'
+      }}<button v-if="!busy" @click="action(() => load())">重试{{ viewName }}</button>
     </p>
     <template v-else-if="data">
-      <div class="entry-layout">
+      <div v-if="!recordsOnly && form" class="entry-layout">
         <form class="primary-panel reminder-form" @submit.prevent="save">
           <h2>把关注变成提醒</h2>
           <label class="check-row"
@@ -163,7 +167,10 @@ onUnmounted(() => {
         </form>
         <aside class="evidence-panel reminder-agenda">
           <span class="eyebrow">NEXT REMINDERS</span>
-          <h2>接下来会提醒什么</h2>
+          <div class="agenda-heading">
+            <h2>接下来会提醒什么</h2>
+            <button :disabled="busy" @click="action(() => load())">刷新待发送计划</button>
+          </div>
           <p class="caption">
             {{ data.settings.enabled ? '自动提醒已开启' : '自动提醒已暂停' }} · 时间均为北京时间
           </p>
@@ -198,9 +205,9 @@ onUnmounted(() => {
           </details>
         </aside>
       </div>
-      <section class="reminder-history" aria-label="自动提醒记录">
+      <section v-if="recordsOnly" class="reminder-history" aria-label="自动提醒记录">
         <div class="agenda-heading">
-          <h2>提醒记录</h2>
+          <h2>最近提醒</h2>
           <button :disabled="busy" @click="action(() => load())">刷新提醒记录</button>
         </div>
         <p class="caption">

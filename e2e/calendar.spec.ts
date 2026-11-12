@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 
 async function login(page: Page) {
-  await page.goto('./');
+  await page.goto('./#/calendar');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
   await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeVisible();
@@ -34,7 +34,7 @@ test('基金：草稿持久化、人工确认、区间修改与取消', async ({
   await page.getByRole('checkbox').press('Tab');
   await expect(page.getByRole('button', { name: '确认入历' })).toBeFocused();
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('heading', { name: '事件详情', exact: true })).toBeFocused();
+  await expect(page.getByRole('heading', { name: '测试基金赎回窗口', exact: true })).toBeFocused();
   await expect(page.getByRole('heading', { name: '测试基金赎回窗口' })).toBeVisible();
   await page.getByRole('button', { name: '修改日期、条件或状态' }).click();
   await page.getByLabel('开始日期').fill('2026-11-03');
@@ -62,7 +62,7 @@ test('日历：补录时刻、月份切换、日期选择、窄屏议程', async
   await page.getByLabel('原文依据').fill('测试用官方公告明确北京时间11月5日9时30分发布。');
   await page.getByRole('button', { name: '保存事件' }).click();
   await expect(page.locator('.event-datetime')).toHaveText('2026/11/05 09:30 · 北京时间');
-  await page.getByRole('button', { name: '日历', exact: true }).click();
+  await page.getByRole('button', { name: '返回财经日历', exact: true }).click();
   await page.getByRole('button', { name: '2026-11-05，', exact: false }).click();
   await expect(page.getByRole('button', { name: /测试宏观发布/ })).toBeVisible();
   await page.screenshot({
@@ -73,9 +73,12 @@ test('日历：补录时刻、月份切换、日期选择、窄屏议程', async
   await expect(page.getByRole('heading', { name: '2026 年 12 月' })).toBeVisible();
   await page.getByRole('button', { name: '上个月' }).click();
   await page.getByRole('button', { name: '议程', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '日历官方来源', exact: true }).click();
   await page.getByText('官方来源 · 5 项待核查', { exact: true }).click();
   await expect(page.getByText('当前服务未启用自动同步。')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('calendar-desktop.png'), fullPage: true });
+  await page.getByRole('link', { name: '财经日历', exact: true }).click();
   await page.setViewportSize({ width: 393, height: 852 });
   await expect(page.getByRole('button', { name: /测试宏观发布/ })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -88,7 +91,7 @@ test('日历：补录时刻、月份切换、日期选择、窄屏议程', async
   );
   await page.screenshot({ path: testInfo.outputPath('calendar-mobile.png'), fullPage: true });
   await page.getByRole('button', { name: /测试宏观发布/ }).click();
-  await expect(page.getByRole('heading', { name: '事件详情' })).toBeFocused();
+  await expect(page.getByRole('heading', { name: '测试宏观发布', exact: true })).toBeFocused();
 });
 
 test('来源失败和日历加载失败提供可恢复状态', async ({ page }) => {
@@ -118,6 +121,8 @@ test('来源失败和日历加载失败提供可恢复状态', async ({ page }) 
     }),
   );
   await page.getByRole('button', { name: '重试', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '日历官方来源', exact: true }).click();
   await page.getByText('官方来源 · 1 项待核查', { exact: true }).click();
   await expect(page.getByText('官方来源返回 HTTP 403')).toBeVisible();
 });
@@ -132,6 +137,8 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
   const source = data.sources.find((item: { id: string }) => item.id === 'nbs');
   const snapshotEvent = data.events.find((item: { source: string }) => item.source === 'nbs');
   expect(source.last_success).toBe(0);
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '日历官方来源', exact: true }).click();
   const summary = page.locator('summary').filter({ hasText: '官方来源' });
   await summary.focus();
   await page.keyboard.press('Enter');
@@ -152,6 +159,7 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
     path: testInfo.outputPath('calendar-snapshot-desktop.png'),
     fullPage: true,
   });
+  await page.getByRole('link', { name: '财经日历', exact: true }).click();
   await page.setViewportSize({ width: 393, height: 852 });
   await page.getByRole('button', { name: '下个月' }).click();
   await expect(page.getByRole('heading', { name: '2026 年 11 月', exact: true })).toBeVisible();
@@ -160,7 +168,7 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
     .getByRole('button', { name: new RegExp(snapshotEvent.title) })
     .first()
     .click();
-  await expect(page.getByRole('heading', { name: '事件详情', exact: true })).toBeFocused();
+  await expect(page.getByRole('heading', { name: snapshotEvent.title, exact: true })).toBeFocused();
   await expect(page.getByText('官方原文快照', { exact: true })).toBeVisible();
   await expect(page.getByText(/核对 2026\/10\/30/)).toBeVisible();
   await expect(page.getByText('此后改期尚未自动核对，请以官方最新公告为准。')).toBeVisible();
@@ -169,7 +177,7 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
     path: testInfo.outputPath('calendar-snapshot-mobile.png'),
     fullPage: true,
   });
-  await page.getByRole('button', { name: '日历', exact: true }).click();
+  await page.getByRole('button', { name: '返回财经日历', exact: true }).click();
   await expect(
     page.getByRole('button', { name: new RegExp(snapshotEvent.title) }).first(),
   ).toBeFocused();
@@ -224,8 +232,11 @@ test('补充来源：单独标记、来源链接和 BLS 故障同时保留', asy
     }),
   );
   await login(page);
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '日历官方来源', exact: true }).click();
   await page.locator('summary').filter({ hasText: '官方来源' }).click();
   await expect(page.getByText('官方来源返回 HTTP 403')).toBeVisible();
+  await page.getByRole('link', { name: '财经日历', exact: true }).click();
   await page.getByRole('button', { name: '下个月' }).click();
   await expect(page.getByRole('heading', { name: '2026 年 11 月', exact: true })).toBeVisible();
   await page.getByRole('button', { name: '议程', exact: true }).click();

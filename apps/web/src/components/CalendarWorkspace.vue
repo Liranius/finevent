@@ -1,10 +1,16 @@
 <script setup lang="ts">
+import { outlinedChevronLeft, outlinedChevronRight } from '@quasar/extras/material-icons-outlined';
+import { QBtn } from 'quasar';
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import { api, ApiError, formatTime } from '../api';
 import {
+  agendaTime,
   beijingDay,
+  calendarEntries,
+  dayLabel,
+  monthAgenda,
   blankEvent,
   eventDays,
   eventOrigin,
@@ -17,7 +23,7 @@ import {
   type EventDetail,
   type FundDraft,
 } from '../calendar';
-import { returnToList, type CalendarNavigation } from '../workspace-navigation';
+import { linkedOrigin, returnToList, type CalendarNavigation } from '../workspace-navigation';
 import CalendarLinks from './CalendarLinks.vue';
 import EventEditor from './EventEditor.vue';
 import EventReminder from './EventReminder.vue';
@@ -27,9 +33,10 @@ const props = defineProps<{ navigation?: CalendarNavigation }>();
 const emit = defineEmits<{ expired: []; devices: []; remember: [state: CalendarNavigation] }>();
 const route = useRoute();
 const router = useRouter();
-const today = beijingDay(new Date());
-const month = ref(props.navigation?.month ?? today.slice(0, 7));
-const selectedDay = ref(props.navigation?.day ?? today);
+const today = ref(beijingDay(new Date()));
+const month = ref(props.navigation?.month ?? today.value.slice(0, 7));
+const selectedDay = ref(props.navigation?.day ?? today.value);
+const reminderHistory = computed(() => route.name === 'reminder-history');
 const mode = computed(() =>
   route.name === 'calendar-event'
     ? 'detail'
@@ -37,9 +44,11 @@ const mode = computed(() =>
       ? 'fund'
       : route.name === 'calendar-new'
         ? 'manual'
-        : route.name === 'reminders'
-          ? 'reminders'
-          : 'calendar',
+        : route.name === 'calendar-sources'
+          ? 'sources'
+          : route.name === 'reminders' || reminderHistory.value
+            ? 'reminders'
+            : 'calendar',
 );
 const layout = ref<'month' | 'agenda'>(
   props.navigation?.layout ??
@@ -68,32 +77,60 @@ const heading = ref<HTMLElement | null>(null);
 const filter = ref(props.navigation?.filter ?? 'all');
 const manual = ref(blankEvent());
 const days = computed(() => monthDays(month.value));
-const events = computed(() =>
-  (data.value?.events ?? [])
-    .filter((e) => filter.value === 'all' || e.kind === filter.value)
-    .sort(
-      (a, b) => eventDays(a)[0].localeCompare(eventDays(b)[0]) || a.start.localeCompare(b.start),
+const entries = computed(() =>
+  calendarEntries(
+    (data.value?.events ?? []).filter(
+      (event) => filter.value === 'all' || event.kind === filter.value,
     ),
+  ),
 );
 const atDay = (day: string) =>
-  events.value.filter((event) => {
-    const [start, end] = eventDays(event);
-    return start <= day && end >= day;
-  });
-const agenda = computed(() =>
-  layout.value === 'month'
-    ? atDay(selectedDay.value)
-    : events.value.filter((event) => {
-        const [start, end] = eventDays(event);
-        return start <= `${month.value}-31` && end >= `${month.value}-01`;
-      }),
+  entries.value.filter(({ start, end }) => start <= day && end >= day).map(({ event }) => event);
+const groups = computed(() => {
+  if (layout.value === 'month')
+    return [{ day: selectedDay.value, events: atDay(selectedDay.value) }];
+  const result = monthAgenda(entries.value, month.value);
+  if (today.value.startsWith(month.value) && !result.some((group) => group.day === today.value)) {
+    result.push({ day: today.value, events: [] });
+    result.sort((a, b) => a.day.localeCompare(b.day));
+  }
+  return result;
+});
+const agendaCount = computed(() =>
+  groups.value.reduce((count, group) => count + group.events.length, 0),
 );
 let timer: ReturnType<typeof setInterval> | undefined;
 let requestID = 0;
 let disposed = false;
 let ready = false;
 let routeRequest = 0;
-let lastEvent = props.navigation?.lastEvent ?? '';
+const lastEvent = ref(props.navigation?.lastEvent ?? '');
+let rowTop = props.navigation?.rowTop;
+let loadedMonth = '';
+function calendarPosition(): CalendarNavigation {
+  return {
+    day: selectedDay.value,
+    month: month.value,
+    layout: layout.value,
+    filter: filter.value,
+    lastEvent: lastEvent.value,
+    rowTop,
+  };
+}
+function rememberCalendar() {
+  router.options.history.replace(route.fullPath, { calendarReader: { ...calendarPosition() } });
+}
+watch(
+  [month, selectedDay, layout, filter],
+  () => {
+    if (route.name === 'calendar' && !routing.value) {
+      lastEvent.value = '';
+      rowTop = undefined;
+      rememberCalendar();
+    }
+  },
+  { flush: 'sync' },
+);
 const routeError = ref(false);
 async function action(work: () => Promise<void>) {
   working.value = true;
@@ -109,9 +146,14 @@ async function action(work: () => Promise<void>) {
   }
 }
 async function refresh() {
+  today.value = beijingDay(new Date());
   const id = ++requestID;
+  const requestedMonth = month.value;
+  if (loadedMonth !== requestedMonth) data.value = null;
   const next = await api<CalendarData>(`calendar?from=${days.value[0]}&to=${days.value[41]}`);
-  if (id === requestID) data.value = next;
+  if (id !== requestID || month.value !== requestedMonth) return;
+  data.value = next;
+  loadedMonth = requestedMonth;
   const eventID = detail.value?.event.id;
   if (mode.value === 'detail' && eventID && !editing.value && !busy.value) {
     const latest = await api<EventDetail>(`calendar/${eventID}`);
@@ -133,20 +175,43 @@ async function moveMonth(delta: number) {
   await action(refresh);
 }
 async function currentMonth() {
-  month.value = today.slice(0, 7);
-  selectedDay.value = today;
+  today.value = beijingDay(new Date());
+  month.value = today.value.slice(0, 7);
+  selectedDay.value = today.value;
   await action(refresh);
+  await nextTick();
+  const target = document.getElementById(
+    layout.value === 'agenda' ? 'agenda-' + today.value : 'day-' + today.value,
+  );
+  target?.focus({ preventScroll: true });
+  target?.scrollIntoView({ block: 'center' });
 }
 async function focusHeading() {
   await nextTick();
   heading.value?.focus();
 }
-function openEvent(id: string) {
-  void router.push({ name: 'calendar-event', params: { id } });
+function openEvent(id: string, day?: string) {
+  if (route.name === 'calendar') {
+    if (day) selectedDay.value = day;
+    lastEvent.value = id;
+    rowTop = document.getElementById('calendar-event-' + id)?.getBoundingClientRect().top;
+    rememberCalendar();
+  }
+  void router.push({
+    name: 'calendar-event',
+    params: { id },
+    state: reminderHistory.value ? { linkedFrom: route.fullPath } : undefined,
+  });
+}
+function eventOriginLabel() {
+  if (linkedOrigin(router, 'reminder-history')) return '提醒记录';
+  if (linkedOrigin(router, 'news-detail')) return '报道详情';
 }
 function navigate(next: 'calendar' | 'fund' | 'manual' | 'reminders') {
-  if (next === 'calendar' && mode.value === 'detail') returnToList(router, 'calendar');
-  else void router.push({ name: next === 'manual' ? 'calendar-new' : next });
+  if (next === 'calendar' && mode.value === 'detail') {
+    if (eventOriginLabel()) router.back();
+    else returnToList(router, 'calendar');
+  } else void router.push({ name: next === 'manual' ? 'calendar-new' : next });
 }
 async function syncRoute() {
   if (route.meta.workspace !== 'calendar') return;
@@ -163,11 +228,24 @@ async function syncRoute() {
   draft.value = null;
   const current = () => !disposed && request === routeRequest && path === route.fullPath;
   try {
-    if (name === 'calendar-event') {
+    if (name === 'calendar') {
+      const saved = router.options.history.state.calendarReader as CalendarNavigation | undefined;
+      if (saved) {
+        month.value = saved.month;
+        selectedDay.value = saved.day;
+        layout.value = saved.layout;
+        filter.value = saved.filter;
+        lastEvent.value = saved.lastEvent || lastEvent.value;
+        rowTop = saved.rowTop;
+      }
+      if (!data.value || loadedMonth !== month.value) await action(refresh);
+    } else if (name === 'calendar-sources') {
+      await action(refresh);
+    } else if (name === 'calendar-event') {
       const next = await api<EventDetail>(`calendar/${encodeURIComponent(id)}`);
       if (!current()) return;
       detail.value = next;
-      lastEvent = id;
+      lastEvent.value = id;
     } else if (name === 'fund-draft') {
       const next = await api<FundDraft>(`fund-drafts/${encodeURIComponent(id)}`);
       if (!current()) return;
@@ -179,9 +257,13 @@ async function syncRoute() {
     } else if (name === 'calendar-new') manual.value = blankEvent();
     await nextTick();
     if (!current()) return;
-    if (name === 'calendar')
-      (document.getElementById(`calendar-event-${lastEvent}`) ?? heading.value)?.focus();
-    else heading.value?.focus();
+    if (name === 'calendar') {
+      const anchor = document.getElementById('calendar-event-' + lastEvent.value);
+      if (anchor && typeof rowTop === 'number') {
+        window.scrollBy(0, anchor.getBoundingClientRect().top - rowTop);
+        anchor.focus({ preventScroll: true });
+      } else (anchor ?? heading.value)?.focus();
+    } else heading.value?.focus();
   } catch (cause) {
     if (!current()) return;
     routeError.value = true;
@@ -253,13 +335,11 @@ function resetDraft() {
   void router.replace({ name: 'fund' });
 }
 onMounted(async () => {
-  await action(refresh);
-  if (disposed) return;
   ready = true;
   await syncRoute();
   if (disposed) return;
   timer = setInterval(() => {
-    if (!busy.value && document.visibilityState === 'visible')
+    if (mode.value !== 'reminders' && !busy.value && document.visibilityState === 'visible')
       void refresh().catch((cause: unknown) => {
         if (cause instanceof ApiError && cause.status === 401) emit('expired');
         else error.value = '日历刷新失败，保留上次读取的数据。请稍后重试。';
@@ -267,13 +347,7 @@ onMounted(async () => {
   }, 30000);
 });
 onUnmounted(() => {
-  emit('remember', {
-    month: month.value,
-    day: selectedDay.value,
-    layout: layout.value,
-    filter: filter.value,
-    lastEvent,
-  });
+  emit('remember', calendarPosition());
   disposed = true;
   ++routeRequest;
   clearInterval(timer);
@@ -283,9 +357,11 @@ onUnmounted(() => {
 
 <template>
   <section class="calendar-workspace" aria-label="财经日历工作区">
-    <div class="page-heading">
+    <div class="page-heading" :class="{ 'calendar-list-heading': mode === 'calendar' }">
       <div>
-        <span class="eyebrow">THE EVENT AGENDA</span>
+        <button v-if="mode === 'detail'" class="quiet calendar-back" @click="navigate('calendar')">
+          <span aria-hidden="true">← </span>返回{{ eventOriginLabel() || '财经日历' }}
+        </button>
         <h1 ref="heading" tabindex="-1">
           {{
             mode === 'fund'
@@ -293,29 +369,22 @@ onUnmounted(() => {
               : mode === 'manual'
                 ? '补录官方事件'
                 : mode === 'detail'
-                  ? '事件详情'
-                  : mode === 'reminders'
-                    ? '提醒设置'
-                    : '财经日历'
+                  ? (detail?.event.title ?? '事件详情')
+                  : mode === 'sources'
+                    ? '日历官方来源'
+                    : mode === 'reminders'
+                      ? reminderHistory
+                        ? '提醒记录'
+                        : '提醒设置'
+                      : '财经日历'
           }}
         </h1>
-        <p class="intro">提前知道时间，保留判断依据。</p>
       </div>
-      <div class="record-actions">
-        <button
-          :aria-current="mode === 'calendar' ? 'page' : undefined"
-          @click="navigate('calendar')"
-        >
-          日历</button
+      <div v-if="!route.meta.settings && mode !== 'detail'" class="record-actions">
+        <button v-if="mode !== 'calendar'" @click="navigate('calendar')">日历</button
         ><button :aria-current="mode === 'fund' ? 'page' : undefined" @click="navigate('fund')">
           基金录入</button
         ><button class="quiet" @click="navigate('manual')">补录事件</button>
-        <button
-          :aria-current="mode === 'reminders' ? 'page' : undefined"
-          @click="navigate('reminders')"
-        >
-          提醒设置
-        </button>
       </div>
     </div>
     <p v-if="error" class="message error" role="alert">
@@ -323,16 +392,28 @@ onUnmounted(() => {
     </p>
     <p v-if="notice" class="message" role="status">{{ notice }}</p>
     <template v-if="mode === 'calendar'">
-      <p v-if="snapshotCount" class="message warning" role="status">
-        {{ snapshotCount }}
-        项日程来自已核对的官方快照。后续改期尚未自动核对；核对时间与主源状态见下方“官方来源”。
-      </p>
       <div class="calendar-toolbar">
         <div class="month-navigation">
-          <button aria-label="上个月" :disabled="busy" @click="moveMonth(-1)">←</button>
+          <QBtn
+            flat
+            round
+            dense
+            :icon="outlinedChevronLeft"
+            aria-label="上个月"
+            :disable="busy"
+            @click="moveMonth(-1)"
+          />
           <h2 aria-live="polite">{{ month.replace('-', ' 年 ') }} 月</h2>
-          <button aria-label="下个月" :disabled="busy" @click="moveMonth(1)">→</button
-          ><button class="quiet" :disabled="busy" @click="currentMonth">本月</button>
+          <QBtn
+            flat
+            round
+            dense
+            :icon="outlinedChevronRight"
+            aria-label="下个月"
+            :disable="busy"
+            @click="moveMonth(1)"
+          />
+          <button class="quiet" :disabled="busy" @click="currentMonth">今天</button>
         </div>
         <div class="calendar-filters">
           <label for="calendar-filter" class="sr-only">事件类别</label
@@ -363,10 +444,12 @@ onUnmounted(() => {
           <div class="month-grid" role="group" aria-label="选择日期">
             <button
               v-for="day in days"
+              :id="'day-' + day"
               :key="day"
               class="day-cell"
               :class="{ outside: !day.startsWith(month), today: day === today }"
               :aria-pressed="selectedDay === day"
+              :aria-current="day === today ? 'date' : undefined"
               :aria-label="`${day}，${atDay(day).length} 个事件`"
               @click="selectedDay = day"
             >
@@ -378,30 +461,61 @@ onUnmounted(() => {
         </div>
         <section class="agenda-panel" aria-labelledby="agenda-title">
           <div class="agenda-heading">
-            <h2 id="agenda-title">{{ layout === 'month' ? selectedDay : '本月议程' }}</h2>
-            <span>{{ agenda.length }} 个事件</span>
+            <h2 id="agenda-title">{{ layout === 'month' ? dayLabel(selectedDay) : '本月议程' }}</h2>
+            <span>{{ agendaCount }} 个事件</span>
           </div>
-          <p v-if="!agenda.length" class="empty">暂无已收录事件。可切换月份或查看下方来源状态。</p>
-          <ol v-else class="agenda-list">
-            <li v-for="event in agenda" :key="event.id">
-              <button
-                :id="`calendar-event-${event.id}`"
-                class="agenda-event"
-                @click="openEvent(event.id)"
-              >
-                <span class="event-meta"
-                  >{{ eventOrigin(event) }} · {{ states[event.status]
-                  }}<span v-if="event.importance === 3"> · 重要</span></span
-                ><strong :class="{ cancelled: event.status === 'cancelled' }">{{
-                  event.title
-                }}</strong
-                ><time>{{ eventTime(event) }}</time
-                ><span v-if="event.fund_code" class="event-meta">基金 {{ event.fund_code }}</span>
-              </button>
-            </li>
-          </ol>
+          <p v-if="!agendaCount" class="empty">暂无已收录事件。可切换月份或事件类别。</p>
+          <div v-for="group in groups" :key="group.day" class="agenda-group">
+            <h3
+              v-if="layout === 'agenda'"
+              :id="'agenda-' + group.day"
+              tabindex="-1"
+              class="agenda-date"
+            >
+              <time :datetime="group.day">{{ dayLabel(group.day) }}</time>
+              <span v-if="group.day === today" class="agenda-today">今天</span>
+            </h3>
+            <p v-if="layout === 'agenda' && !group.events.length && agendaCount" class="caption">
+              今天没有新开始的日程。
+            </p>
+            <ol v-if="group.events.length" class="agenda-list">
+              <li v-for="event in group.events" :key="event.id">
+                <button
+                  :id="'calendar-event-' + event.id"
+                  class="agenda-event"
+                  :class="{ 'calendar-just-read': lastEvent === event.id }"
+                  @click="openEvent(event.id, group.day)"
+                >
+                  <span class="event-clock">{{ agendaTime(event) }}</span>
+                  <strong :class="{ cancelled: event.status === 'cancelled' }">{{
+                    event.title
+                  }}</strong>
+                  <span class="event-meta"
+                    >{{ eventOrigin(event) }} · {{ states[event.status]
+                    }}<span v-if="event.importance === 3"> · 重要</span
+                    ><span v-if="event.fund_code"> · 基金 {{ event.fund_code }}</span
+                    ><span v-if="lastEvent === event.id" class="news-read-marker"
+                      >刚读到这里</span
+                    ></span
+                  >
+                </button>
+              </li>
+            </ol>
+          </div>
         </section>
       </div>
+      <p v-if="snapshotCount" class="message warning" role="status">
+        {{ snapshotCount }}
+        项日程来自已核对的官方快照。后续改期尚未自动核对；<RouterLink
+          :to="{ name: 'calendar-sources' }"
+          >查看官方来源与核对时间</RouterLink
+        >。
+      </p>
+    </template>
+    <template v-else-if="mode === 'sources'">
+      <p v-if="!data" class="empty">
+        官方来源暂未加载。<button :disabled="busy" @click="action(refresh)">重试</button>
+      </p>
       <details v-if="data" class="source-details">
         <summary>
           官方来源 ·
@@ -524,6 +638,8 @@ onUnmounted(() => {
     </section>
     <ReminderSettings
       v-else-if="mode === 'reminders'"
+      :key="route.name ?? undefined"
+      :records-only="reminderHistory"
       @expired="emit('expired')"
       @devices="emit('devices')"
       @event="openEvent"
@@ -535,7 +651,6 @@ onUnmounted(() => {
             >{{ eventOrigin(detail.event) }} · {{ states[detail.event.status] }} · 第
             {{ detail.event.version }} 版</span
           >
-          <h2 class="detail-title">{{ detail.event.title }}</h2>
           <p class="event-datetime">{{ eventTime(detail.event) }}</p>
           <p class="caption">
             原始时区 {{ detail.event.timezone
@@ -620,7 +735,7 @@ onUnmounted(() => {
     <p v-else-if="mode === 'detail'" class="empty" role="status">
       {{ routing ? '正在读取事件…' : '事件读取失败。' }}
     </p>
-    <footer>
+    <footer v-if="!reminderHistory">
       日程以官方最新公告为准。自动提醒需在提醒设置中开启并选择设备；改期、取消以最新日程为准。
     </footer>
   </section>
