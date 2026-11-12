@@ -1,0 +1,30 @@
+[Unit]
+Description=finevent feasibility observer
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+User=finevent
+Group=finevent
+WorkingDirectory=/srv/example/finevent/current
+ExecStart=/srv/example/finevent/current/finevent -data /srv/example/finevent-data -web /srv/example/finevent/current/dist -collect -trendradar /srv/example/trendradar/output
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+MemoryMax=96M
+MemorySwapMax=0
+Environment=GOMEMLIMIT=64MiB
+Environment=GOMAXPROCS=1
+TasksMax=64
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/example/finevent-data
+ReadOnlyPaths=/srv/example/trendradar/output
+
+[Install]
+WantedBy=multi-user.target

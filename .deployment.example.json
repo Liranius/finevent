@@ -1,0 +1,13 @@
+{
+  "sshTarget": "deploy@host.example.com",
+  "siteHost": "www.example.com",
+  "siteAlias": "example.com",
+  "appRoot": "/srv/example/finevent",
+  "dataRoot": "/srv/example/finevent-data",
+  "backupRoot": "/srv/example/finevent-backups",
+  "trendradarRoot": "/srv/example/trendradar",
+  "hostStateRoot": "/srv/example/finevent-host",
+  "legacyRoot": "/srv/example/legacy-app",
+  "sshStageRoot": "/srv/example/staging",
+  "nginxSnippet": "/etc/nginx/snippets/example-app.conf"
+}

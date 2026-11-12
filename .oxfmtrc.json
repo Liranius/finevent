@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "singleQuote": true,
+  "sortImports": true,
+  "sortTailwindcss": true,
+  "ignorePatterns": [
+    ".agents/skills/interface-design/**",
+    ".agents/skills/bm-orient/**",
+    ".agents/skills/bm-decide/**",
+    ".agents/skills/bm-writing/**",
+    ".agents/skills/bm-remember/**",
+    ".agents/skills/bm-checkpoint/**"
+  ]
+}

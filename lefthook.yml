@@ -1,0 +1,27 @@
+pre-commit:
+  piped: true
+  # 由 Lefthook 按文件自动引用路径，避免 Windows 的 sh -c 吞掉嵌套双引号。
+  jobs:
+    # 在自动修复触碰部分暂存的笔记前拒绝；最后再核对将要提交的版本。
+    - name: knowledge-privacy
+      run: node scripts/knowledge-review.mjs staged
+    - name: oxlint
+      run: pnpm exec oxlint --fix --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+    - name: eslint
+      run: pnpm exec eslint --fix --cache {staged_files}
+      stage_fixed: true
+    - name: stylelint
+      glob: '**/*.{css,vue}'
+      run: pnpm exec stylelint --fix {staged_files}
+      stage_fixed: true
+    - name: format
+      run: pnpm exec oxfmt --no-error-on-unmatched-pattern {staged_files}
+      stage_fixed: true
+    - name: knowledge-privacy-final
+      run: node scripts/knowledge-review.mjs staged
+
+commit-msg:
+  jobs:
+    - name: commitlint
+      run: pnpm exec commitlint --edit "{1}"

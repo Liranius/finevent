@@ -1,0 +1,71 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run:
+        description: Successful main push CI run ID
+        required: true
+        type: string
+      after_review:
+        description: Reviewed completed operation ID (latest unless recovering a pre-install failure)
+        required: true
+        type: string
+      baseline_id:
+        description: Optional reviewed read-only persistence-check ID
+        type: string
+      baseline_sha256:
+        description: Exact reviewed baseline report SHA256 (required with baseline_id)
+        type: string
+      recover_preflight:
+        description: Optional latest failed pre-install operation to recover explicitly
+        type: string
+      failed_report_sha256:
+        description: Exact failed report SHA256 (required with recover_preflight)
+        type: string
+      profile:
+        description: Verification profile (news does not repeat the six-hour calendar cycle)
+        required: true
+        default: calendar
+        type: choice
+        options: [calendar, news]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - name: Checkout trusted deployment tools
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Verify artifact, render privately and launch once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ inputs.ci_run }}
+          AFTER_REVIEW: ${{ inputs.after_review }}
+          PROFILE: ${{ inputs.profile }}
+          BASELINE_ID: ${{ inputs.baseline_id }}
+          BASELINE_SHA256: ${{ inputs.baseline_sha256 }}
+          RECOVER_PREFLIGHT: ${{ inputs.recover_preflight }}
+          FAILED_REPORT_SHA256: ${{ inputs.failed_report_sha256 }}
+          FINEVENT_DEPLOY_CONFIG: ${{ secrets.FINEVENT_DEPLOY_CONFIG }}
+          FINEVENT_SSH_KEY: ${{ secrets.FINEVENT_SSH_KEY }}
+          FINEVENT_KNOWN_HOSTS: ${{ secrets.FINEVENT_KNOWN_HOSTS }}
+        run: >-
+          python3 scripts/actions-release.py deploy --ci-run "$CI_RUN" --after-review "$AFTER_REVIEW" --profile "$PROFILE"
+          --baseline-id "$BASELINE_ID" --baseline-sha256 "$BASELINE_SHA256"
+          --recover-preflight "$RECOVER_PREFLIGHT" --failed-report-sha256 "$FAILED_REPORT_SHA256"
+      - name: Remove private render workspace
+        if: ${{ always() }}
+        run: rm -rf -- .validation/release-rendered
