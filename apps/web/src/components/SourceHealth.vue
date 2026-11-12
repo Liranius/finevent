@@ -5,7 +5,7 @@ import { api, ApiError } from '../api';
 import { newsTime, sourceName } from '../news';
 import { sourceStateName, type TrendHealth, type TrendFailurePage } from '../source-health';
 
-const emit = defineEmits<{ expired: [] }>();
+const emit = defineEmits<{ expired: []; refresh: [] }>();
 const id = useId();
 const health = ref<TrendHealth | null>(null);
 const busy = ref(false);
@@ -43,6 +43,10 @@ async function refresh(manual = true) {
   } finally {
     if (!disposed) busy.value = false;
   }
+}
+function refreshFromButton() {
+  emit('refresh');
+  void refresh();
 }
 async function loadHistory(more = false) {
   const request = ++historyRequest;
@@ -100,7 +104,7 @@ onUnmounted(() => {
   <section class="source-health" :aria-labelledby="`${id}-heading`" :aria-busy="busy">
     <div class="section-title">
       <h2 :id="`${id}-heading`">TrendRadar 来源健康</h2>
-      <button class="quiet" :disabled="busy" @click="refresh()">
+      <button class="quiet" :disabled="busy" @click="refreshFromButton">
         {{ busy ? '读取中…' : '刷新来源状态' }}
       </button>
     </div>

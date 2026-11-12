@@ -65,7 +65,7 @@ describe('reminder settings', () => {
       error: '',
     };
     vi.mocked(api).mockResolvedValue({ ...fixture, history: [record] });
-    const wrapper = mount(ReminderSettings);
+    const wrapper = mount(ReminderSettings, { props: { recordsOnly: true } });
     await flushPromises();
     expect(wrapper.find('.reminder-history strong').text()).toBe('推送服务已接受');
     vi.mocked(api).mockResolvedValue({ ...fixture, history: [{ ...record, received_at: 102 }] });

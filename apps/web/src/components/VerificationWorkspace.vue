@@ -61,7 +61,7 @@ function mb(bytes: number | undefined) {
   <div class="page-heading">
     <div>
       <span class="eyebrow">VERIFICATION LOG</span>
-      <h1 ref="heading" tabindex="-1">验证工作台</h1>
+      <h1 ref="heading" tabindex="-1">开发者功能</h1>
       <p class="intro">提醒送达、采集时效、资源共存。用实际记录确认。</p>
     </div>
     <div class="as-of">

@@ -3,7 +3,7 @@ import { createECDH, randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 
 async function login(page: Page) {
-  await page.goto('./');
+  await page.goto('./#/calendar');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
   await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeVisible();
@@ -43,7 +43,7 @@ async function seed(page: Page) {
   expect(event.status()).toBe(201);
   return {
     device: (await device.json()) as { id: number },
-    event: (await event.json()) as { id: string },
+    event: (await event.json()) as { id: string; title: string },
   };
 }
 
@@ -77,7 +77,6 @@ test('日历提醒：单独关注、设置保存、重载、桌面与窄屏、�
   await expect(page.locator('.reminder-agenda .reminder-event-link')).toHaveCount(2);
   await page.screenshot({ path: testInfo.outputPath('reminders-desktop.png'), fullPage: true });
   await page.reload();
-  await page.getByRole('button', { name: '提醒设置', exact: true }).click();
   await expect(page.getByLabel('开启日历自动提醒')).toBeChecked();
   await expect(page.getByLabel('关注基金代码')).toHaveValue('123456');
   await page.setViewportSize({ width: 393, height: 852 });
@@ -93,9 +92,20 @@ test('日历提醒：单独关注、设置保存、重载、桌面与窄屏、�
   await page.getByRole('button', { name: '保存提醒设置' }).click();
   await expect(page.getByRole('status')).toContainText('自动提醒已暂停');
   await expect(page.locator('.reminder-agenda .reminder-event-link')).toHaveCount(0);
+  await expect(page.getByRole('region', { name: '自动提醒记录' })).toHaveCount(0);
+  await page.getByRole('link', { name: '返回设置', exact: true }).click();
+  await page.getByRole('link', { name: '提醒记录', exact: true }).click();
   await expect(
     page.getByRole('region', { name: '自动提醒记录' }).getByText('已撤销', { exact: true }),
   ).toHaveCount(2);
+  await page
+    .getByRole('region', { name: '自动提醒记录' })
+    .getByRole('button', { name: event.title, exact: true })
+    .first()
+    .click();
+  await expect(page.getByRole('heading', { name: event.title, level: 1 })).toBeFocused();
+  await page.getByRole('button', { name: '返回提醒记录', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '提醒记录', level: 1 })).toBeFocused();
 });
 
 test('改期和取消会撤销旧计划，通知链接定位事件详情', async ({ page }) => {
@@ -116,10 +126,11 @@ test('改期和取消会撤销旧计划，通知链接定位事件详情', async
   await expect(
     page.getByRole('region', { name: '此事件的提醒' }).getByRole('listitem'),
   ).toHaveCount(2);
-  await page.getByRole('button', { name: '验证工作台', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '验证工作台', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '设备、测试通知与诊断', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '开发者功能', exact: true })).toBeVisible();
   await page.goto(`./#event=${event.id}`);
-  await expect(page.getByRole('heading', { name: '事件详情', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: event.title, exact: true })).toBeVisible();
   await page.getByRole('button', { name: '修改日期、条件或状态' }).click();
   const changed = new Date(Date.now() + 5 * 86400000).toISOString().slice(0, 16);
   await page.getByLabel('开始时间').fill(changed);
@@ -160,12 +171,13 @@ test('提醒设置加载失败可以重试，设备入口可以返回日历', as
   await page.route('**/api/v1/reminders', (route) =>
     route.fulfill({ status: 503, json: { error: '提醒服务暂不可用' } }),
   );
-  await page.getByRole('button', { name: '提醒设置', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '日历提醒设置', exact: true }).click();
   await expect(page.getByRole('alert')).toContainText('提醒服务暂不可用');
   await page.unroute('**/api/v1/reminders');
   await page.getByRole('button', { name: '重试提醒设置' }).click();
   await page.getByRole('button', { name: '管理接收设备' }).click();
-  await expect(page.getByRole('heading', { name: '验证工作台', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '财经日历', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '开发者功能', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '财经日历', exact: true }).click();
   await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeVisible();
 });

@@ -88,7 +88,7 @@ onUnmounted(() => {
     <AnalysisResult v-if="job" :job="job" />
     <template v-if="loaded">
       <p v-if="!info?.configured || !info.settings.enabled" class="caption">
-        AI 尚未启用；在“AI 解读”中检查配置与开关，新闻原文可正常阅读。
+        AI 尚未启用；可前往设置中的“AI 解读”查看开关，新闻原文可正常阅读。
       </p>
       <template v-else-if="!job || needsUpdate || canRetry(job)">
         <p v-if="job && !needsUpdate && canRetry(job)" class="caption">

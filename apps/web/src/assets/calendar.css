@@ -157,7 +157,8 @@
   overflow-wrap: anywhere;
 }
 
-.agenda-event time {
+.event-clock {
+  color: var(--accent);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
 }
@@ -258,9 +259,41 @@ textarea {
   max-width: 660px;
 }
 
-.detail-title {
-  margin-top: 12px;
+.calendar-back {
+  margin-bottom: 12px;
+}
+
+.calendar-workspace h1 {
   overflow-wrap: anywhere;
+}
+
+.agenda-date {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 12px 8px;
+  margin: 16px 0 0;
+  border-bottom: 1px solid var(--rule);
+  background: var(--paper);
+  font-size: 16px;
+}
+
+.agenda-today {
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.calendar-just-read {
+  background: var(--highlight);
+  box-shadow: inset 3px 0 var(--accent);
+}
+
+.agenda-event .news-read-marker {
+  margin-inline-start: 8px;
+}
+
+.agenda-event:focus-visible {
+  outline-offset: -3px;
 }
 
 .event-datetime {
@@ -364,8 +397,15 @@ textarea {
 }
 
 @media (width <= 680px) {
-  .calendar-workspace .page-heading .record-actions {
-    margin-top: 20px;
+  .calendar-list-heading {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .calendar-list-heading .record-actions {
+    margin: 0;
   }
 
   .calendar-toolbar {

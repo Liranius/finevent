@@ -1,11 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page, type TestInfo, type Locator } from '@playwright/test';
 
 import type { CalendarLink } from '../apps/web/src/calendar-links.js';
 import type { CalendarEvent } from '../apps/web/src/calendar.js';
 import type { NewsEntry } from '../apps/web/src/news.js';
 
 // Browser fixtures exercise interaction; Go tests cover actual transactions and persistence.
-async function setup(page: Page) {
+async function setup(page: Page, start: 'news' | 'calendar' = 'news') {
   const event: CalendarEvent = {
     id: 'link-event',
     source: 'manual',
@@ -138,11 +138,12 @@ async function setup(page: Page) {
       },
     }),
   );
-  await page.goto('./#news');
+  await page.goto(start === 'calendar' ? './#/calendar' : './#news');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
+  if (start === 'calendar') return state;
   await page.getByLabel('标题或正文').fill('CPI');
-  await page.getByRole('button', { name: '应用筛选' }).click();
+  await page.getByLabel('标题或正文').press('Enter');
   await page.getByRole('button', { name: news.title, exact: true }).click();
   return state;
 }
@@ -174,13 +175,13 @@ test('日程关联：核对、双向详情、筛选保留、解除与窄屏键�
   await expect(panel.getByText('测试日程依据：11 月 5 日发布 CPI。')).toBeVisible();
   await panel.screenshot({ path: testInfo.outputPath('calendar-links-desktop.png') });
   await panel.getByRole('link', { name: state.event.title }).click();
-  await expect(page.getByRole('heading', { name: '事件详情', exact: true })).toBeFocused();
+  await expect(page.getByRole('heading', { name: state.event.title, exact: true })).toBeFocused();
   await page
     .getByRole('region', { name: '相关报道', exact: true })
     .getByRole('link', { name: state.news.title })
     .click();
   await expect(page.getByRole('heading', { name: state.news.title, exact: true })).toBeFocused();
-  await page.getByRole('button', { name: '返回新闻列表' }).click();
+  await page.getByRole('button', { name: '返回报道列表' }).click();
   await expect(page.getByLabel('标题或正文')).toHaveValue('CPI');
   expect(state.queries.at(-1)?.get('q')).toBe('CPI');
   await page.getByRole('button', { name: state.news.title, exact: true }).click();
@@ -232,4 +233,132 @@ test('日程关联：修订提示、冲突保留输入、刷新失败与恢复',
   state.fail = false;
   await panel.getByRole('button', { name: '刷新关联' }).click();
   await expect(panel.getByRole('alert')).toHaveCount(0);
+});
+
+async function calendarReadingFlow(page: Page, testInfo: TestInfo, mobile: boolean) {
+  const activate = (target: Locator) => (mobile ? target.tap() : target.press('Enter'));
+  await page.clock.setFixedTime(new Date('2026-10-14T04:00:00Z'));
+  const state = await setup(page, 'calendar');
+  const { event, news } = state;
+  Object.assign(event, {
+    kind: 'macro',
+    precision: 'minute',
+    start: '2026-11-05T12:00:00+08:00',
+    end: '2026-11-05T12:00:00+08:00',
+  });
+  state.links = [
+    {
+      id: 2,
+      event,
+      news,
+      event_snapshot: event,
+      news_snapshot: news,
+      note: '测试依据：报道提及该次发布。',
+      changed: false,
+      confirmed_at: 1,
+    },
+  ];
+  const others = Array.from({ length: 20 }, (_, i) => {
+    const time = '2026-11-05T' + String(i + 1).padStart(2, '0') + ':30:00+08:00';
+    return { ...event, id: 'other-' + i, title: '测试发布 ' + i, start: time, end: time };
+  });
+  let nextDayTitle = '次日发布';
+  await page.route('**/api/v1/calendar?**', (route) => {
+    const contains = new URL(route.request().url()).searchParams.get('to')! >= '2026-11-05';
+    return route.fulfill({
+      json: {
+        sources: [],
+        sync_enabled: false,
+        events: contains
+          ? [
+              ...others,
+              event,
+              { ...event, id: 'fund', kind: 'fund', title: '仅基金窗口' },
+              {
+                ...event,
+                id: 'next-day',
+                title: nextDayTitle,
+                start: '2026-11-06',
+                end: '2026-11-06',
+                precision: 'date',
+              },
+            ]
+          : [],
+      },
+    });
+  });
+  await page.getByRole('button', { name: '下个月' }).click();
+  await page.getByLabel('事件类别').selectOption('macro');
+  if (mobile) {
+    await expect(page.getByRole('button', { name: '议程', exact: true })).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.locator('.agenda-date')).toHaveCount(2);
+  } else {
+    await page.getByRole('button', { name: /2026-11-05，/ }).click();
+    const grid = await page.locator('.month-panel').boundingBox();
+    const agenda = await page.locator('.agenda-panel').boundingBox();
+    expect(grid!.x + grid!.width).toBeLessThan(agenda!.x);
+  }
+  await expect(page.getByRole('button', { name: /仅基金窗口/ })).toHaveCount(0);
+  const row = page.locator('#calendar-event-link-event');
+  await row.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  const top = await row.evaluate((el) => el.getBoundingClientRect().top);
+  expect(await page.evaluate(() => scrollY)).toBeGreaterThan(0);
+  await activate(row);
+  const title = page.getByRole('heading', { name: event.title, exact: true });
+  await expect(title).toBeFocused();
+  const linked = page.getByRole('link', { name: news.title });
+  await activate(linked);
+  await expect(page.locator('#news-detail-heading')).toBeFocused();
+  await expect(page.getByRole('button', { name: /返回事件详情/ })).toBeVisible();
+  await page.reload();
+  const back = page.getByRole('button', { name: /返回事件详情/ });
+  await activate(back);
+  await expect(title).toBeFocused();
+  await page.getByRole('button', { name: '返回财经日历', exact: true }).click();
+  await expect(row).toBeFocused();
+  await expect(page.getByLabel('事件类别')).toHaveValue('macro');
+  await expect(page.getByRole('heading', { name: '2026 年 11 月' })).toBeVisible();
+  expect(
+    Math.abs((await row.evaluate((el) => el.getBoundingClientRect().top)) - top),
+  ).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: testInfo.outputPath('calendar-reader-return.png') });
+  await page.goForward();
+  await expect(title).toBeFocused();
+  await page.goBack();
+  await expect(row).toBeFocused();
+  if (mobile) await page.getByRole('button', { name: '月历', exact: true }).click();
+  await expect(page.locator('#day-2026-11-05')).toHaveAttribute('aria-pressed', 'true');
+  if (mobile) await page.getByRole('button', { name: '议程', exact: true }).click();
+  await page.getByRole('button', { name: '今天', exact: true }).click();
+  await expect(page.locator(mobile ? '#agenda-2026-10-14' : '#day-2026-10-14')).toBeFocused();
+  await page.clock.setFixedTime(new Date('2026-11-06T04:00:00Z'));
+  await page.getByRole('button', { name: '今天', exact: true }).click();
+  await expect(page.locator(mobile ? '#agenda-2026-11-06' : '#day-2026-11-06')).toBeFocused();
+  const todayEvent = page.locator('#calendar-event-next-day');
+  await expect(todayEvent).toContainText(nextDayTitle);
+  nextDayTitle = '今日更新的发布时间';
+  await activate(page.getByRole('button', { name: '今天', exact: true }));
+  await expect(todayEvent).toContainText(nextDayTitle);
+  await expect(page.locator(mobile ? '#agenda-2026-11-06' : '#day-2026-11-06')).toBeFocused();
+}
+
+test.describe('桌面月历', () => {
+  test.use({ viewport: { width: 1366, height: 900 } });
+
+  test('下月宏观事件 → 关联报道 → 原事件和日历阅读位置', async ({ page }, testInfo) => {
+    await calendarReadingFlow(page, testInfo, false);
+    await expect(page.getByLabel('事件类别')).toHaveValue('macro');
+  });
+});
+
+test.describe('触屏议程', () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
+
+  test('下月宏观事件 → 关联报道 → 原事件和日历阅读位置', async ({ page }, testInfo) => {
+    await calendarReadingFlow(page, testInfo, true);
+    await expect(page.getByLabel('事件类别')).toHaveValue('macro');
+  });
 });

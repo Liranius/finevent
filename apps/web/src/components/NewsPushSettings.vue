@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue';
-import { RouterLink } from 'vue-router';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
+import { RouterLink, useRoute } from 'vue-router';
 
 import { api, ApiError, formatTime } from '../api';
 import type { NewsPushData, NewsPushSettings } from '../news-push';
 import { reminderState } from '../reminders';
 
+const props = defineProps<{ recordsOnly: boolean }>();
+const route = useRoute();
 const emit = defineEmits<{ expired: []; devices: [] }>();
 const data = ref<NewsPushData | null>(null);
 const form = ref<NewsPushSettings | null>(null);
@@ -14,6 +16,7 @@ const error = ref('');
 const refreshError = ref('');
 const notice = ref('');
 let disposed = false;
+let readRequest = 0;
 let refreshing = false;
 let timer: ReturnType<typeof setInterval> | undefined;
 function message(cause: unknown) {
@@ -21,8 +24,9 @@ function message(cause: unknown) {
   return cause instanceof Error ? cause.message : '新闻推送设置暂时无法读取。';
 }
 async function load(reset = false) {
+  const request = ++readRequest;
   const next = await api<NewsPushData>('news-push');
-  if (disposed) return;
+  if (disposed || request !== readRequest) return;
   data.value = next;
   if (reset || !form.value) form.value = structuredClone(next.settings);
 }
@@ -55,6 +59,10 @@ async function save() {
     busy.value = false;
   }
 }
+watch(
+  () => props.recordsOnly,
+  () => void refresh(),
+);
 function onVisible() {
   void refresh();
 }
@@ -71,14 +79,16 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section aria-label="新闻关注与推送">
-    <p v-if="error" class="message error" role="alert">{{ error }}</p>
+  <div>
+    <p v-if="error && !recordsOnly" class="message error" role="alert">{{ error }}</p>
     <p v-if="refreshError" class="message error" role="alert">
       {{ refreshError }} <button @click="refresh">重试读取推送记录</button>
     </p>
-    <p v-if="notice" class="message" role="status">{{ notice }}</p>
-    <p v-if="!data && !refreshError" class="empty" role="status">正在读取新闻推送设置…</p>
-    <div v-if="data && form" class="entry-layout">
+    <p v-if="notice && !recordsOnly" class="message" role="status">{{ notice }}</p>
+    <p v-if="!data && !refreshError" class="empty" role="status">
+      {{ recordsOnly ? '正在读取通知记录…' : '正在读取推送设置…' }}
+    </p>
+    <div v-if="!recordsOnly && data && form" class="entry-layout">
       <form class="primary-panel reminder-form" aria-label="新闻推送设置" @submit.prevent="save">
         <span class="eyebrow">FOLLOW THE IMPORTANT</span>
         <h2>只提醒关注的重要变化</h2>
@@ -144,15 +154,23 @@ onUnmounted(() => {
         <p class="caption">
           来源发布时间未知会明确标记。推送服务接受不等于锁屏显示，设备回执与点击另行记录。
         </p>
+        <div class="record-actions">
+          <button :disabled="busy" @click="refresh">刷新推送状态</button>
+          <RouterLink :to="{ name: 'news-notifications' }">查看报道通知记录</RouterLink>
+        </div>
       </aside>
     </div>
-    <section v-if="data" class="reminder-history" aria-label="新闻通知记录">
+    <section
+      v-if="data && recordsOnly"
+      class="reminder-history news-notification-history"
+      aria-label="报道通知记录"
+    >
       <div class="agenda-heading">
-        <h2>最近通知记录</h2>
+        <h2>最近通知</h2>
         <button :disabled="busy" @click="refresh">刷新推送记录</button>
       </div>
       <p v-if="!data.history.length" class="empty">
-        尚无新闻通知。开启后，符合关注范围的新重要报道会在这里留下记录。
+        尚无报道通知。开启推送后，符合关注条件的新报道会在这里留下记录。
       </p>
       <ul v-else class="plain-list">
         <li v-for="item in data.history" :key="item.id">
@@ -163,7 +181,11 @@ onUnmounted(() => {
           <RouterLink
             v-if="item.news_id"
             class="reminder-event-link"
-            :to="{ name: 'news-detail', params: { id: item.news_id } }"
+            :to="{
+              name: 'news-detail',
+              params: { id: item.news_id },
+              state: { linkedFrom: route.fullPath },
+            }"
             >{{ item.title }}</RouterLink
           >
           <strong v-else>{{ item.title }} · 原报道已按保留期清理</strong>
@@ -180,5 +202,5 @@ onUnmounted(() => {
         </li>
       </ul>
     </section>
-  </section>
+  </div>
 </template>

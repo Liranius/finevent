@@ -95,6 +95,48 @@ export function newsTime(value: number | null) {
       }).format(new Date(value * 1000))
     : '未知';
 }
+const listDay = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
+const listMonthDay = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  month: 'long',
+  day: 'numeric',
+});
+const listClock = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'Asia/Shanghai',
+  hour: '2-digit',
+  minute: '2-digit',
+  hourCycle: 'h23',
+});
+
+export function newsRowTimes(
+  item: Pick<NewsEntry, 'first_seen' | 'published_at'>,
+  byPublication: boolean,
+) {
+  const primary = byPublication ? item.published_at : item.first_seen;
+  const secondary = byPublication ? item.first_seen : item.published_at;
+  const day = primary ? listDay.format(primary * 1000) : '';
+  const otherDay = secondary ? listDay.format(secondary * 1000) : '';
+  let dateLabel = '';
+  if (otherDay && otherDay !== day) {
+    dateLabel =
+      otherDay.slice(0, 4) === day.slice(0, 4) ? listMonthDay.format(secondary * 1000) : otherDay;
+  }
+  const secondaryLabel = byPublication ? '首次记录' : '发布';
+  return {
+    day: day || (byPublication ? '发布时间未知' : '首次记录时间未知'),
+    clock: primary ? listClock.format(primary * 1000) : '未知',
+    secondary: secondary
+      ? [secondaryLabel, dateLabel, listClock.format(secondary * 1000)].filter(Boolean).join(' ')
+      : secondaryLabel + '时间未知',
+    earlierPublication:
+      !byPublication && secondary < primary && dateLabel ? dateLabel + '发布' : '',
+  };
+}
 export function firstSeenName(source: string) {
   return source.startsWith('trendradar:') ? '上游首次记录' : '首次发现';
 }
@@ -108,8 +150,14 @@ export function safeNewsURL(raw: string | null) {
     return '';
   }
 }
-export function topicNames(ids: string[] | undefined, labels: Topic[] | undefined) {
-  return (ids ?? []).map((id) => labels?.find((label) => label.id === id)?.name ?? id).join(' · ');
+export function topicNames(
+  ids: string[] | undefined,
+  labels: Topic[] | undefined,
+  separator = ' · ',
+) {
+  return (ids ?? [])
+    .map((id) => labels?.find((label) => label.id === id)?.name ?? id)
+    .join(separator);
 }
 export const importanceName: Record<number, string> = { 1: '一般', 2: '关注', 3: '重要' };
 export const relationName: Record<string, string> = {

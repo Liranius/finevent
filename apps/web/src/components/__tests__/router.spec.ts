@@ -5,7 +5,7 @@ import { createAppRouter } from '../../router';
 
 describe('通知与深链接兼容', () => {
   it.each([
-    ['/', '/calendar'],
+    ['/', '/news'],
     ['/news', '/news'],
     ['/news=', '/news'],
     ['/news=321', '/news/321'],

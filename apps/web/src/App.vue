@@ -1,9 +1,13 @@
 <script setup lang="ts">
+import { outlinedArrowBack } from '@quasar/extras/material-icons-outlined';
+import { QBtn } from 'quasar';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { RouterView, useRoute, useRouter } from 'vue-router';
 
 import { api, ApiError, vapidBytes, type Status } from './api';
+import ReaderNav from './components/ReaderNav.vue';
 import { pushDeadline } from './push-timeout';
+import { returnToList } from './workspace-navigation';
 import type { NewsNavigation, CalendarNavigation } from './workspace-navigation';
 
 const authenticated = ref(false);
@@ -175,10 +179,29 @@ function applyUpdate() {
 function reload() {
   if (updateReady.value) window.location.reload();
 }
-function navigateWorkspace(next: 'calendar' | 'news' | 'ai' | 'verification') {
-  void router.push(
-    next === 'verification' ? { name: next, params: { tab: 'push' } } : { name: next },
-  );
+function openDevices() {
+  void router.push({ name: 'verification', params: { tab: 'push' } });
+}
+function returnToSection(event: Event, name: 'news' | 'calendar' | 'settings') {
+  if (
+    event instanceof MouseEvent &&
+    event.button === 0 &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.shiftKey &&
+    !event.altKey
+  ) {
+    event.preventDefault();
+    returnToList(router, name);
+  }
+}
+function navigate(event: Event, name: string) {
+  if (
+    (name === 'news' && route.name === 'news-detail') ||
+    (name === 'calendar' && route.name === 'calendar-event')
+  ) {
+    returnToSection(event, name);
+  }
 }
 
 onMounted(async () => {
@@ -224,16 +247,20 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="workspace">
+  <div class="workspace" :class="{ signed: authenticated }">
     <header class="masthead">
       <a class="brand" href="/finevent/"
         ><img :src="'/finevent/icon.svg'" width="32" height="32" alt="" />finevent<span
           >财经事件</span
         ></a
       >
+      <ReaderNav
+        v-if="authenticated"
+        :active="route.meta.settings ? 'settings' : workspace"
+        @navigate="navigate"
+      />
       <div class="header-actions">
-        <span class="phase">财经事件 · 个人工作台</span
-        ><button v-if="authenticated" class="quiet" :disabled="busy" @click="logout">退出</button>
+        <button v-if="authenticated" class="quiet" :disabled="busy" @click="logout">退出</button>
       </div>
     </header>
     <main>
@@ -266,32 +293,16 @@ onUnmounted(() => {
         <p class="caption">使用服务器初始化时设置的密码。</p>
       </section>
       <template v-else>
-        <nav class="section-nav workspace-nav" aria-label="工作区">
-          <button
-            :aria-current="workspace === 'calendar' ? 'page' : undefined"
-            @click="navigateWorkspace('calendar')"
-          >
-            财经日历
-          </button>
-          <button
-            :aria-current="workspace === 'news' ? 'page' : undefined"
-            @click="navigateWorkspace('news')"
-          >
-            新闻事件流
-          </button>
-          <button
-            :aria-current="workspace === 'ai' ? 'page' : undefined"
-            @click="navigateWorkspace('ai')"
-          >
-            AI 解读
-          </button>
-          <button
-            :aria-current="workspace === 'verification' ? 'page' : undefined"
-            @click="navigateWorkspace('verification')"
-          >
-            验证工作台
-          </button>
-        </nav>
+        <QBtn
+          v-if="route.meta.settings && route.name !== 'settings'"
+          class="settings-back"
+          flat
+          no-caps
+          :icon="outlinedArrowBack"
+          label="返回设置"
+          :to="{ name: 'settings' }"
+          @click="returnToSection($event, 'settings')"
+        />
         <RouterView v-slot="{ Component }">
           <component
             :is="Component"
@@ -299,7 +310,7 @@ onUnmounted(() => {
             :navigation="calendarNavigation"
             @remember="calendarNavigation = $event"
             @expired="authenticated = false"
-            @devices="navigateWorkspace('verification')"
+            @devices="openDevices()"
           />
           <component
             :is="Component"
@@ -307,11 +318,12 @@ onUnmounted(() => {
             :navigation="newsNavigation"
             @remember="newsNavigation = $event"
             @expired="authenticated = false"
-            @devices="navigateWorkspace('verification')"
           />
           <component
             :is="Component"
-            v-else-if="workspace === 'ai'"
+            v-else-if="workspace === 'ai' || workspace === 'preferences'"
+            :key="workspace === 'ai' ? route.path : undefined"
+            @devices="openDevices"
             @expired="authenticated = false"
           />
           <component

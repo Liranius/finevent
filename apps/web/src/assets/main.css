@@ -1,23 +1,57 @@
 :root {
-  font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-sans);
   color: var(--ink);
   background: var(--paper);
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizelegibility;
   -webkit-font-smoothing: antialiased;
 
-  --paper: #f4f3ee;
-  --sheet: #fcfbf7;
-  --input: #eeeee7;
-  --ink: #27362e;
-  --muted: #647168;
-  --faint: #7c857d;
-  --rule: #d8ddd3;
-  --accent: #185b46;
-  --accent-hover: #104a37;
-  --highlight: #e3eadf;
-  --warning: #8a591b;
-  --error: #a33128;
+  --font-sans: 'PingFang SC', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
+  --paper: #f6f7f9;
+  --sheet: #fff;
+  --surface: #fff;
+  --input: #f2f3f5;
+  --headline: #191b20;
+  --ink: #34373d;
+  --muted: #595f69;
+  --faint: #696e77;
+  --rule: #e2e4e8;
+  --section-rule: #c1c5cc;
+  --accent: #285ba4;
+  --q-primary: var(--accent);
+  --accent-hover: #214c89;
+  --highlight: #eaf1fb;
+  --success: #316c50;
+  --warning: #8a550f;
+  --error: #b13936;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --paper: #141517;
+  --sheet: #191a1c;
+  --surface: #222326;
+  --input: #2a2c30;
+  --headline: #eeeff1;
+  --ink: #d4d6da;
+  --muted: #a9acb2;
+  --faint: #9599a2;
+  --rule: #333539;
+  --section-rule: #4a4d53;
+  --accent: #9bbcf0;
+  --accent-hover: #b5d1fa;
+  --highlight: #253246;
+  --success: #99c6a9;
+  --warning: #e6bd81;
+  --error: #f2a39c;
+  --q-dark: var(--surface);
+  --q-dark-page: var(--sheet);
+}
+
+.text-on-primary {
+  color: var(--sheet) !important;
 }
 
 * {
@@ -25,9 +59,16 @@
 }
 
 body {
+  font-family: inherit;
+  background: var(--sheet);
+  color: var(--ink);
   margin: 0;
   font-size: 14px;
   line-height: 1.7;
+}
+
+:root[data-theme='dark'] body {
+  color: var(--ink);
 }
 
 button,
@@ -141,8 +182,12 @@ p {
   margin: 0;
 }
 
+h1,
+h2 {
+  color: var(--headline);
+}
+
 h1 {
-  font-family: 'Noto Serif SC', 'Songti SC', SimSun, serif;
   font-size: 32px;
   font-weight: 600;
   line-height: 1.4;
@@ -179,7 +224,6 @@ p {
   display: flex;
   align-items: center;
   gap: 12px;
-  font-family: Georgia, serif;
   font-size: 24px;
   font-weight: 600;
   text-decoration: none;
@@ -190,7 +234,6 @@ p {
   padding-left: 12px;
   border-left: 1px solid var(--rule);
   color: var(--muted);
-  font-family: 'Microsoft YaHei', sans-serif;
   font-size: 12px;
   font-weight: 400;
 }
@@ -397,7 +440,7 @@ main {
 }
 
 .evidence-chain .complete {
-  color: var(--accent);
+  color: var(--success);
 }
 
 .evidence-chain .complete::before {
@@ -630,5 +673,35 @@ footer {
 @media (prefers-reduced-motion: reduce) {
   button:active {
     transform: none;
+  }
+}
+
+.workspace h3,
+.workspace h4,
+.workspace h5 {
+  letter-spacing: normal;
+  line-height: 1.5;
+}
+
+.workspace h3 {
+  font-size: 18px;
+}
+
+.workspace h4 {
+  font-size: 16px;
+}
+
+.workspace h5 {
+  font-size: 14px;
+}
+
+.masthead .reader-nav {
+  margin-left: auto;
+  align-self: stretch;
+}
+
+@media (width <= 700px) {
+  .workspace.signed {
+    padding-bottom: calc(70px + env(safe-area-inset-bottom));
   }
 }

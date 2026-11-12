@@ -1,6 +1,8 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import type { NewsMeta } from '../apps/web/src/news.js';
 import type { TrendHealth, TrendFailurePage } from '../apps/web/src/source-health.js';
+import { readerDevices } from './reader-devices.js';
 
 async function sourceFixtures(page: Page) {
   const now = Math.floor(Date.now() / 1000);
@@ -99,9 +101,58 @@ async function loginSources(page: Page) {
   await page.goto('./');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
-  await page.getByRole('button', { name: '验证工作台', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '设备、测试通知与诊断', exact: true }).click();
   await page.getByRole('button', { name: '02 采集时效' }).click();
   await expect(page.getByRole('heading', { name: 'TrendRadar 来源健康' })).toBeVisible();
+}
+
+for (const device of readerDevices) {
+  test.describe(`${device.name}采集通道`, () => {
+    test.use({ viewport: device.viewport, hasTouch: device.hasTouch });
+
+    test('手动刷新和切回前台都更新通道及来源健康', async ({ page }) => {
+      await page.clock.install();
+      const { health, state } = await sourceFixtures(page);
+      let channelError = '通道初次读取';
+      let channelReads = 0;
+      await page.route('**/api/v1/news/meta', async (route) => {
+        channelReads++;
+        const response = await route.fetch();
+        const meta: NewsMeta = await response.json();
+        meta.channels[0].error = channelError;
+        await route.fulfill({ json: meta });
+      });
+      await page.goto('./#/settings/news-channels');
+      await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
+      await page.getByRole('button', { name: '进入工作台' }).click();
+      await expect(page.getByText(channelError, { exact: true })).toBeVisible();
+      const button = page.getByRole('button', { name: '刷新来源状态' });
+      channelError = '手动刷新后的通道故障';
+      health.warnings = ['手动刷新后的来源状态'];
+      await device.activate(button);
+      await expect(page.getByText(health.warnings[0], { exact: true })).toBeVisible();
+      await expect(page.getByText(channelError, { exact: true })).toBeVisible();
+
+      const setVisibility = (value: DocumentVisibilityState) =>
+        page.evaluate((visibilityState) => {
+          Object.defineProperty(document, 'visibilityState', {
+            configurable: true,
+            value: visibilityState,
+          });
+          document.dispatchEvent(new Event('visibilitychange'));
+        }, value);
+      const beforeHidden = [channelReads, state.requests];
+      await setVisibility('hidden');
+      await page.clock.fastForward(31000);
+      expect([channelReads, state.requests]).toEqual(beforeHidden);
+      channelError = '回到前台后的通道故障';
+      health.warnings = ['回到前台后的来源状态'];
+      await setVisibility('visible');
+      await expect(page.getByText(health.warnings[0], { exact: true })).toBeVisible();
+      await expect(page.getByText(channelError, { exact: true })).toBeVisible();
+    });
+  });
 }
 
 test('来源健康：状态分层、恢复历史、筛选分页、键盘与窄屏', async ({ page }, testInfo) => {
@@ -197,8 +248,8 @@ test('来源健康：加载失败重试、后台保留错误、缺数据与新�
   await expect(panel.getByText('尚无来源状态记录', { exact: true })).toBeVisible();
   await expect(panel.getByText('来源状态采样未启用', { exact: false })).toBeVisible();
   await expect(panel.getByText('测试：状态表缺失', { exact: false })).toBeVisible();
-  await page.getByRole('button', { name: '新闻事件流', exact: true }).click();
-  await page.getByText('采集通道状态', { exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '采集通道状态', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'TrendRadar 来源健康' })).toBeVisible();
   await expect(page.getByText('数据库导入成功不代表新闻源正常', { exact: false })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('source-health-empty.png'), fullPage: true });
