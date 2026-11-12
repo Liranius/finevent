@@ -1,10 +1,9 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { isAbsolute, join, relative, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 
-import { JSON_SCHEMA, load } from 'js-yaml';
+import { validateNote } from './knowledge-privacy.mjs';
 
 const knowledgeDirectory = 'docs/knowledge';
 const snapshots = new Set(['coding_session', 'codex_session']);
@@ -24,6 +23,28 @@ function git(root, args) {
 
 function rootOf(cwd) {
   return realpathSync(git(cwd, ['rev-parse', '--show-toplevel']).trim());
+}
+
+function checkStagedNotes(cwd) {
+  const root = rootOf(cwd);
+  const listed = git(root, [
+    'diff',
+    '--cached',
+    '--diff-filter=ACMRT',
+    '--name-only',
+    '-z',
+    '--',
+    knowledgeDirectory,
+  ]);
+  for (const path of listed.split('\0').filter((name) => /\.md$/i.test(name))) {
+    // :path reads stage zero, including when the working copy differs or is missing.
+    const text = git(root, ['cat-file', 'blob', `:${path}`]);
+    try {
+      validateNote(text);
+    } catch (error) {
+      throw new Error(`${path}: ${error.message}`, { cause: error });
+    }
+  }
 }
 
 function inside(root, path) {
@@ -58,7 +79,7 @@ function readNotes(root) {
         knowledgeDirectory,
       ])
         .split('\0')
-        .filter((path) => path.endsWith('.md')),
+        .filter((path) => /\.md$/i.test(path)),
     ),
   ];
   const notes = [],
@@ -70,22 +91,9 @@ function readNotes(root) {
       if (!inside(root, realpathSync(full))) throw new Error('note resolves outside this worktree');
       if (statSync(full).size > 256 * 1024) throw new Error('note exceeds the 256 KiB read limit');
       const text = readFileSync(full, 'utf8').replace(/^\uFEFF/, '');
-      const frontmatter = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
-      if (text.startsWith('---') && !frontmatter) throw new Error('unterminated frontmatter');
-      const metadata = frontmatter
-        ? load(frontmatter[1], { schema: JSON_SCHEMA, maxDepth: 20 })
-        : {};
-      if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata))
-        throw new Error('frontmatter must be a mapping');
+      const { metadata, body } = validateNote(text);
       const type = scalar(metadata.type) || 'note';
       if (type === 'schema') continue;
-      const privateField = /^(cwd|repo_root|hostname|username|(?:\w+_)?(?:session|turn)_id)$/i;
-      const privatePath =
-        /(?:\b[a-z]:[\\/]|(?:^|[\s\x60('"=])(?:\/(?:Users|home)\/[^/\s]+\/|\\\\[^\\\s]+\\)|file:\/\/\/|codex:\/\/threads?\/)/im;
-      if (Object.keys(metadata).some((key) => privateField.test(key)) || privatePath.test(text))
-        throw new Error(
-          'Note contains workstation or chat metadata; use repository-relative references.',
-        );
       let sources = [];
       try {
         if (metadata.sources !== undefined && !Array.isArray(metadata.sources))
@@ -103,7 +111,7 @@ function readNotes(root) {
         permalink: scalar(metadata.permalink),
         sources,
         historical: snapshots.has(type) || retired.has(status),
-        body: frontmatter ? text.slice(frontmatter[0].length) : text,
+        body,
       });
     } catch (error) {
       warnings.push({ path, message: error.message });
@@ -264,18 +272,20 @@ export function main(args = process.argv.slice(2), cwd = process.cwd()) {
     },
   });
   const [command, ...terms] = positionals;
+  if (command === 'staged' && terms.length === 0) return checkStagedNotes(cwd);
   const options = { limit: Number(values.limit), offset: Number(values.offset) };
   if (command === 'check' && terms.length === 0)
     return checkKnowledge(cwd, { ...options, since: values.since ?? 'HEAD' });
   if (command === 'find' && values.since === undefined) return findKnowledge(cwd, terms, options);
   throw new Error(
-    'Usage: knowledge-review.mjs check [--since <commit>] [--limit 10] [--offset 0] | find <literal terms...> [--limit 10] [--offset 0]',
+    'Usage: knowledge-review.mjs staged | check [--since <commit>] [--limit 10] [--offset 0] | find <literal terms...> [--limit 10] [--offset 0]',
   );
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (import.meta.main) {
   try {
-    console.log(JSON.stringify(main(), null, 2));
+    const result = main();
+    if (result !== undefined) console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

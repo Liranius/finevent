@@ -1,6 +1,8 @@
 // @vitest-environment node
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
+  chmodSync,
+  copyFileSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -205,6 +207,117 @@ describe('knowledge impact checks', () => {
       /private-turn|private-account|private-chat/,
     );
   });
+
+  it('validates the final note including nested metadata, malformed YAML and body links', () => {
+    const validator = fileURLToPath(new URL('../scripts/knowledge-privacy.mjs', import.meta.url));
+    const run = (input: string) =>
+      spawnSync(process.execPath, [validator], { input, encoding: 'utf8' });
+    for (const input of [
+      '---\r\nmetadata: [{ "session_id": "private-value" }]\r\n---\r\n',
+      '---\ntitle: [private-value\n---\n',
+      '---\ntype: schema\n---\n[chat](codex://thread/private-value)',
+      '---\nmeta: {"user\\u006eame": "private-value"}\n---\n',
+      'See </home/private-value/project>',
+      'See file:///private-value/doc.md',
+      'Host field: hostname=private-value',
+    ]) {
+      const result = run(input);
+      expect(result.status).toBe(1);
+      expect(result.stderr).not.toContain('private-value');
+      expect(result.stdout).toBe('');
+    }
+    expect(run('---\ntitle: 交接\n---\n[PR](https://github.com/example/repo/pull/6)').status).toBe(
+      0,
+    );
+  });
+
+  it('checks staged blobs even when the working file differs, moves or disappears', () => {
+    const root = fixture();
+    const path = 'docs/knowledge/交接 笔记.md';
+    const staged = () =>
+      spawnSync(process.execPath, [script, 'staged'], { cwd: root, encoding: 'utf8' });
+    put(root, path, 'codex://threads/private-value');
+    git(root, ['add', path]);
+    put(root, path, '已清理');
+    const rejected = staged();
+    expect(rejected.status).toBe(1);
+    expect(rejected.stderr).toContain(path);
+    expect(rejected.stderr).not.toContain('private-value');
+    rmSync(join(root, path));
+    expect(staged().status).toBe(1);
+    put(root, path, '已清理');
+    git(root, ['add', path]);
+    put(root, path, 'codex://threads/unstaged');
+    expect(staged().status).toBe(0);
+    git(root, ['mv', path, 'docs/knowledge/renamed.MD']);
+    git(root, ['add', 'docs/knowledge/renamed.MD']);
+    expect(staged().status).toBe(1);
+    git(root, ['rm', '-f', 'docs/knowledge/renamed.MD']);
+    expect(staged().status).toBe(0);
+  });
+
+  it('rejects a Git commit through the configured Lefthook privacy job and accepts a clean retry', () => {
+    const root = fixture();
+    const path = 'docs/knowledge/handoff.md';
+    put(root, path, 'Original note\n');
+    const head = commit(root);
+    const repo = dirname(dirname(script));
+    copyFileSync(join(repo, 'package.json'), join(root, 'package.json'));
+    copyFileSync(
+      fileURLToPath(new URL('../lefthook.yml', import.meta.url)),
+      join(root, 'lefthook.yml'),
+    );
+    symlinkSync(
+      dirname(script),
+      join(root, 'scripts'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    symlinkSync(
+      join(repo, 'node_modules'),
+      join(root, 'node_modules'),
+      process.platform === 'win32' ? 'junction' : 'dir',
+    );
+    const hook = join(root, '.empty-hooks/pre-commit');
+    writeFileSync(
+      hook,
+      '#!/bin/sh\nexec node "$TEST_LEFTHOOK" run pre-commit --job knowledge-privacy --job format --job knowledge-privacy-final --no-auto-install\n',
+    );
+    chmodSync(hook, 0o755);
+    const commitNote = () =>
+      spawnSync(
+        'git',
+        [
+          '-c',
+          'user.name=Knowledge Test',
+          '-c',
+          'user.email=knowledge@example.invalid',
+          '-c',
+          'commit.gpgsign=false',
+          'commit',
+          '-m',
+          'docs: record checkpoint',
+        ],
+        {
+          cwd: root,
+          encoding: 'utf8',
+          env: { ...process.env, TEST_LEFTHOOK: fileURLToPath(import.meta.resolve('lefthook')) },
+        },
+      );
+    put(root, path, '---\r\nhostname: private-value\r\n---\r\nNote\r\n');
+    git(root, ['add', path]);
+    put(root, path, 'Repository-relative reference\n');
+    const rejected = commitNote();
+    expect(rejected.status).not.toBe(0);
+    expect(rejected.stdout + rejected.stderr).toContain(
+      'Note contains workstation or chat metadata',
+    );
+    expect(rejected.stdout + rejected.stderr).not.toContain('private-value');
+    expect(git(root, ['rev-parse', 'HEAD'])).toBe(head);
+    expect(readFileSync(join(root, path), 'utf8')).toBe('Repository-relative reference\n');
+    git(root, ['add', path]);
+    expect(commitNote().status).toBe(0);
+    expect(git(root, ['show', `HEAD:${path}`])).toBe('Repository-relative reference');
+  }, 15000);
 
   it('checks the repository knowledge notes that will go through Git review', () => {
     const root = fileURLToPath(new URL('..', import.meta.url));

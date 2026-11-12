@@ -367,7 +367,7 @@ Nginx 重载后，每个 HTTPS 入口最多检查六次，失败间隔一秒；�
 
 ## 提交与合并
 
-提交前完成上述对应检查并审查 diff。`pnpm hooks:install` 安装 Lefthook；钩子会修复并重新暂存匹配文件，需检查副作用。提交信息采用 Conventional Commits。正式审查前将零散修补整理为可构建的逻辑提交，每个提交包含必要测试；托管协作采用 PR 和 rebase merge，平台配置与验证见下方 [CI](#ci)。
+提交前完成上述对应检查并审查 diff。`pnpm hooks:install` 安装 Lefthook。钩子会修复并重新暂存匹配文件，需检查副作用。最后按 Git 暂存版本校验变动的知识笔记，发现本机或聊天标识时阻止提交。提交信息采用 Conventional Commits。正式审查前将零散修补整理为可构建的逻辑提交，每个提交包含必要测试；托管协作采用 PR 和 rebase merge，平台配置与验证见下方 [CI](#ci)。
 
 ## CI
 

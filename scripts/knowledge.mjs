@@ -15,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const version = '0.24.1';
 const windows = process.platform === 'win32';
 const sourceRoot = realpathSync(fileURLToPath(new URL('..', import.meta.url)));
+const guardedRuntime = join(sourceRoot, 'scripts/knowledge-runtime.py');
 const canonical = (path) => (windows ? path.toLowerCase() : path);
 
 function inside(root, path) {
@@ -109,6 +110,7 @@ function bind(cwd) {
 function environment(ctx) {
   return {
     ...process.env,
+    FINEVENT_NODE: process.execPath,
     BASIC_MEMORY_CONFIG_DIR: ctx.settings,
     BASIC_MEMORY_FORCE_LOCAL: 'true',
     BASIC_MEMORY_NO_PROMOS: '1',
@@ -163,8 +165,8 @@ function findUv(ctx) {
   throw new Error('Install uv first (see README: 项目知识), then run pnpm knowledge:setup.');
 }
 
-async function relay(ctx, args, input) {
-  const child = spawn(ctx.executable, args, {
+async function relay(ctx, executable, args, input) {
+  const child = spawn(executable, args, {
     cwd: ctx.root,
     env: environment(ctx),
     windowsHide: true,
@@ -191,7 +193,7 @@ async function relay(ctx, args, input) {
 }
 
 async function checkMcp(ctx) {
-  const child = spawn(ctx.executable, ['mcp'], {
+  const child = spawn(ctx.python, [guardedRuntime, 'mcp'], {
     cwd: ctx.root,
     env: environment(ctx),
     windowsHide: true,
@@ -319,7 +321,7 @@ export async function main(args = process.argv.slice(2)) {
     const ctx = bind(payload.cwd ?? process.cwd());
     requireRuntime(ctx);
     if (rest[0] === 'session-start') process.stdout.write(sessionStart(ctx, input));
-    else await relay(ctx, ['hook', rest[0], '--harness', 'codex'], input);
+    else await relay(ctx, ctx.executable, ['hook', rest[0], '--harness', 'codex'], input);
     return;
   }
   const ctx = bind(process.cwd());
@@ -330,12 +332,12 @@ export async function main(args = process.argv.slice(2)) {
     if (installedVersion(ctx) !== version)
       runSync(ctx, uv, ['pip', 'install', '--python', ctx.python, `basic-memory==${version}`]);
     requireRuntime(ctx);
-    runSync(ctx, ctx.executable, ['project', 'index', ctx.project]);
+    runSync(ctx, ctx.python, [guardedRuntime, 'project', 'index', ctx.project]);
     await doctor(ctx);
   } else if (command === 'doctor') await doctor(ctx);
   else if (command === 'mcp' || command === 'cli') {
     requireRuntime(ctx);
-    await relay(ctx, command === 'mcp' ? ['mcp'] : rest);
+    await relay(ctx, ctx.python, [guardedRuntime, ...(command === 'mcp' ? ['mcp'] : rest)]);
   } else throw new Error('Usage: knowledge.mjs setup | doctor | mcp | cli <args>');
 }
 
