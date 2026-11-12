@@ -11,8 +11,9 @@ test('真实 API：登录失败、键盘登录、三个验证页与退出', asyn
   await page.getByLabel('访问密码').press('Tab');
   await expect(page.getByRole('button', { name: '进入工作台' })).toBeFocused();
   await page.keyboard.press('Enter');
-  await page.getByRole('button', { name: '验证工作台', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '验证工作台', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '设备、测试通知与诊断', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '开发者功能', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '发送测试提醒' })).toBeDisabled();
   await page.getByRole('button', { name: '02 采集时效' }).click();
   await expect(page.getByText('当前服务未开启来源采样', { exact: false })).toBeVisible();
@@ -42,7 +43,8 @@ test.describe('真实离线资源', () => {
       await page.goto(server.url);
       await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
       await page.getByRole('button', { name: '进入工作台' }).click();
-      await page.getByRole('button', { name: '验证工作台', exact: true }).click();
+      await page.getByRole('link', { name: '设置', exact: true }).click();
+      await page.getByRole('link', { name: '设备、测试通知与诊断', exact: true }).click();
       await expect(page.getByRole('heading', { name: '连接这台设备' })).toBeVisible();
       await page.getByLabel('测试场景').selectOption('reconnect');
       await expect(page.getByLabel('测试场景')).toHaveValue('reconnect');
@@ -140,7 +142,8 @@ test('通知记录：接受与接收分离，人工确认写入接口', async ({
   await page.goto('./');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
-  await page.getByRole('button', { name: '验证工作台', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '设备、测试通知与诊断', exact: true }).click();
   await expect(page.getByText('服务已接受', { exact: true })).toBeVisible();
   await expect(page.getByText('设备接收 —', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: '记录第 7 条未看到通知' }).click();

@@ -130,6 +130,57 @@ export function eventTime(event: CalendarEvent): string {
     }).format(new Date(value));
   return `${format(event.start)}${event.start !== event.end ? ` 至 ${format(event.end)}` : ''} · 北京时间`;
 }
+const calendarDayLabel = new Intl.DateTimeFormat('zh-CN', {
+  timeZone: 'UTC',
+  month: 'long',
+  day: 'numeric',
+  weekday: 'long',
+});
+export function dayLabel(day: string) {
+  return calendarDayLabel.format(new Date(day + 'T00:00:00Z'));
+}
+export function agendaTime(event: CalendarEvent): string {
+  if (event.start !== event.end) return eventTime(event);
+  if (event.precision === 'date') return '仅日期';
+  return (
+    new Intl.DateTimeFormat('zh-CN', {
+      timeZone: 'Asia/Shanghai',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(event.start)) + ' · 北京时间'
+  );
+}
+export function calendarEntries(events: CalendarEvent[]) {
+  return events
+    .map((event) => {
+      const [start, end] = eventDays(event);
+      return { event, start, end };
+    })
+    .sort(
+      (a, b) =>
+        a.start.localeCompare(b.start) ||
+        (a.event.precision === b.event.precision
+          ? Date.parse(a.event.start) - Date.parse(b.event.start)
+          : a.event.precision === 'date'
+            ? -1
+            : 1) ||
+        a.event.title.localeCompare(b.event.title, 'zh-CN') ||
+        a.event.id.localeCompare(b.event.id),
+    );
+}
+export function monthAgenda(entries: ReturnType<typeof calendarEntries>, month: string) {
+  const first = month + '-01';
+  const groups = new Map<string, CalendarEvent[]>();
+  for (const { event, start, end } of entries) {
+    if (end < first || start.slice(0, 7) > month) continue;
+    const day = start < first ? first : start;
+    const group = groups.get(day) ?? [];
+    group.push(event);
+    groups.set(day, group);
+  }
+  return Array.from(groups, ([day, events]) => ({ day, events }));
+}
 export function monthDays(month: string): string[] {
   const first = new Date(`${month}-01T00:00:00Z`);
   const offset = (first.getUTCDay() + 6) % 7;

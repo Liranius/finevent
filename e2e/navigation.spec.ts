@@ -7,7 +7,7 @@ async function login(page: Page, link = './') {
   await page.goto(link);
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
-  await expect(page.getByRole('navigation', { name: '工作区', exact: true })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '主导航', exact: true })).toBeVisible();
 }
 
 async function newsFixture(page: Page) {
@@ -75,13 +75,16 @@ async function createEvent(page: Page) {
 
 test('工作区与验证页：浏览器前进后退、刷新、键盘和默认首页', async ({ page }) => {
   await login(page);
-  await expect(page).toHaveURL(/#\/calendar$/);
-  await page.getByRole('button', { name: '新闻事件流', exact: true }).focus();
+  await expect(page).toHaveURL(/#\/news$/);
+  await page.getByRole('link', { name: '财经日历', exact: true }).click();
+  await page.getByRole('link', { name: '报道', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('#news-heading')).toBeFocused();
-  await page.getByRole('button', { name: 'AI 解读', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: 'AI 设置与预算', exact: true }).click();
   await expect(page.locator('#ai-heading')).toBeFocused();
-  await page.getByRole('button', { name: '验证工作台', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '设备、测试通知与诊断', exact: true }).click();
   await expect(page).toHaveURL(/#\/verification\/push$/);
   await page.getByRole('button', { name: '02 采集时效' }).click();
   await page.getByRole('button', { name: '03 资源共存' }).click();
@@ -89,14 +92,18 @@ test('工作区与验证页：浏览器前进后退、刷新、键盘和默认�
   await expect(page.locator('#sources-title')).toBeVisible();
   await page.reload();
   await expect(page).toHaveURL(/#\/verification\/sources$/);
-  await expect(page.getByRole('heading', { name: '验证工作台', exact: true })).toBeFocused();
+  await expect(page.getByRole('heading', { name: '开发者功能', exact: true })).toBeFocused();
   await page.goForward();
   await expect(page.locator('#resources-title')).toBeVisible();
   await page.goBack();
   await page.goBack();
   await expect(page.locator('#push-title')).toBeVisible();
   await page.goBack();
+  await expect(page.getByRole('link', { name: '设备、测试通知与诊断', exact: true })).toBeFocused();
+  await page.goBack();
   await expect(page.locator('#ai-heading')).toBeFocused();
+  await page.goBack();
+  await expect(page.getByRole('link', { name: 'AI 设置与预算', exact: true })).toBeFocused();
   await page.goBack();
   await expect(page.locator('#news-heading')).toBeFocused();
   await page.goBack();
@@ -105,7 +112,7 @@ test('工作区与验证页：浏览器前进后退、刷新、键盘和默认�
 
 test('日历：旧通知链接只占一次历史，返回保留筛选、月份和焦点', async ({ page }, testInfo) => {
   await page.clock.setFixedTime(new Date('2026-11-09T04:00:00Z'));
-  await login(page);
+  await login(page, './#/calendar');
   const event = await createEvent(page);
   await page.reload();
   await page.getByLabel('事件类别').selectOption(event.kind);
@@ -114,24 +121,24 @@ test('日历：旧通知链接只占一次历史，返回保留筛选、月份�
     window.location.hash = `event=${id}`;
   }, event.id);
   await expect(page).toHaveURL(new RegExp(`#/calendar/events/${event.id}$`));
-  await expect(page.getByRole('heading', { name: '事件详情', exact: true })).toBeFocused();
+  await expect(page.getByRole('heading', { name: event.title, exact: true })).toBeFocused();
   await page.goBack();
   await expect(page).toHaveURL(/#\/calendar$/);
   await expect(page.getByLabel('事件类别')).toHaveValue(event.kind);
   await expect(page.locator(`#calendar-event-${event.id}`)).toBeFocused();
   await page.goForward();
   await expect(page.getByRole('heading', { name: event.title, exact: true })).toBeVisible();
-  await page.getByRole('button', { name: '日历', exact: true }).click();
+  await page.getByRole('button', { name: '返回财经日历', exact: true }).click();
   await expect(page.locator(`#calendar-event-${event.id}`)).toBeFocused();
   await page.getByLabel('事件类别').selectOption('macro');
   await page.evaluate((id) => {
     window.location.hash = `event=${id}`;
   }, event.id);
-  await expect(page.getByRole('heading', { name: '事件详情', exact: true })).toBeFocused();
-  await page.getByRole('button', { name: '日历', exact: true }).click();
+  await expect(page.getByRole('heading', { name: event.title, exact: true })).toBeFocused();
+  await page.getByRole('button', { name: '返回财经日历', exact: true }).click();
   await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeFocused();
   await page.getByRole('button', { name: '下个月' }).click();
-  await page.getByRole('button', { name: '新闻事件流', exact: true }).click();
+  await page.getByRole('link', { name: '报道', exact: true }).click();
   await page.goBack();
   await expect(page.getByRole('heading', { name: '2026 年 12 月' })).toBeVisible();
   await expect(page.getByLabel('事件类别')).toHaveValue('macro');
@@ -148,11 +155,11 @@ test('新闻：登录前旧深链接、直接返回、历史恢复与窄屏键�
   await expect(page).toHaveURL(/#\/news\/701$/);
   await expect(page.locator('#news-detail-heading')).toBeFocused();
   const historyLength = await page.evaluate(() => window.history.length);
-  await page.getByRole('button', { name: '返回新闻列表' }).click();
+  await page.getByRole('button', { name: '返回报道列表' }).click();
   await expect(page).toHaveURL(/#\/news$/);
   expect(await page.evaluate(() => window.history.length)).toBe(historyLength);
   await page.getByLabel('标题或正文').fill('导航');
-  await page.getByRole('button', { name: '应用筛选' }).click();
+  await page.getByLabel('标题或正文').press('Enter');
   await page.getByRole('button', { name: '导航测试报道', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('#news-detail-heading')).toBeFocused();
@@ -161,16 +168,19 @@ test('新闻：登录前旧深链接、直接返回、历史恢复与窄屏键�
   await expect(page.getByLabel('标题或正文')).toHaveValue('导航');
   await page.goForward();
   await expect(page.locator('#news-detail-heading')).toBeFocused();
-  await page.getByRole('link', { name: '关注与推送', exact: true }).focus();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '报道关注与推送', exact: true }).focus();
   await page.keyboard.press('Enter');
   await expect(page).toHaveURL(/#\/news\/push$/);
-  await expect(page.locator('#news-heading')).toBeFocused();
+  await expect(page.locator('#news-settings-heading')).toBeFocused();
+  await page.goBack();
+  await expect(page.getByRole('link', { name: '报道关注与推送', exact: true })).toBeFocused();
   await page.goBack();
   await expect(page.locator('#news-detail-heading')).toBeFocused();
-  await page.getByRole('button', { name: '财经日历', exact: true }).click();
+  await page.getByRole('link', { name: '财经日历', exact: true }).click();
   await page.goBack();
   await expect(page.locator('#news-detail-heading')).toBeFocused();
-  await page.getByRole('button', { name: '返回新闻列表' }).click();
+  await page.getByRole('button', { name: '返回报道列表' }).click();
   await expect(page.getByLabel('标题或正文')).toHaveValue('导航');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
@@ -189,7 +199,8 @@ test('草稿与失败路径：已打开应用接收旧链接、刷新、重试�
   });
   expect(response.ok()).toBe(true);
   const draft = (await response.json()) as FundDraft;
-  await page.getByRole('button', { name: 'AI 解读', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: 'AI 设置与预算', exact: true }).click();
   await page.evaluate((id) => {
     window.location.hash = `draft=${id}`;
   }, draft.id);
@@ -245,5 +256,5 @@ test('快速切换事件：迟到的详情响应不覆盖当前位置和焦点',
   release();
   await responded;
   await expect(page.getByRole('heading', { name: '迟到的旧详情' })).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: '事件详情', exact: true })).toBeFocused();
+  await expect(page.getByRole('heading', { name: event.title, exact: true })).toBeFocused();
 });

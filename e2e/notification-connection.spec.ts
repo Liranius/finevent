@@ -4,7 +4,8 @@ test('通知连接显示进度与超时，后台刷新保留错误，迟到成�
   await page.goto('./');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
-  await page.getByRole('button', { name: '验证工作台', exact: true }).click();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '设备、测试通知与诊断', exact: true }).click();
   await page.getByLabel('设备名称', { exact: true }).fill('连接超时验收设备');
   await page.clock.install();
   await page.evaluate(() => {

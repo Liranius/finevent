@@ -7,7 +7,7 @@ async function setup(page: Page) {
   await page.goto('./');
   await page.getByLabel('访问密码').fill('finevent-e2e-password-only');
   await page.getByRole('button', { name: '进入工作台' }).click();
-  await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '报道记录', exact: true })).toBeVisible();
   const ec = createECDH('prime256v1');
   ec.generateKeys();
   const response = await page.request.post('/finevent/api/v1/push/subscriptions', {
@@ -28,9 +28,9 @@ async function setup(page: Page) {
     headers: { Origin: new URL(page.url()).origin },
     data: { enabled: false, devices: [], categories: [], industries: [] },
   });
-  await page.getByRole('button', { name: '新闻事件流', exact: true }).click();
-  await page.getByRole('link', { name: '关注与推送', exact: true }).click();
-  await expect(page.getByRole('heading', { name: '新闻关注与推送', exact: true })).toBeFocused();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '报道关注与推送', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '报道关注与推送', exact: true })).toBeFocused();
   return (await response.json()) as { id: number };
 }
 
@@ -43,11 +43,14 @@ test.afterEach(async ({ page }) => {
 
 test('新闻关注：验证、保存、刷新保留草稿、键盘、窄屏与暂停', async ({ page }, testInfo) => {
   const device = await setup(page);
-  await expect(page.getByText('尚无新闻通知。', { exact: false })).toBeVisible();
+  await page.getByRole('link', { name: '查看报道通知记录' }).click();
+  await expect(page.getByText('尚无报道通知。', { exact: false })).toBeVisible();
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: '报道关注与推送', exact: true })).toBeFocused();
   await page.getByLabel('开启新闻推送', { exact: true }).check();
   await page.getByRole('button', { name: '保存新闻推送设置' }).click();
   await expect(page.getByRole('alert')).toContainText('请选择接收设备和关注范围');
-  await page.getByRole('button', { name: '刷新推送记录' }).click();
+  await page.getByRole('button', { name: '刷新推送状态' }).click();
   await expect(page.getByRole('alert')).toContainText('请选择接收设备和关注范围');
   await expect(page.getByLabel('开启新闻推送', { exact: true })).toBeChecked();
   await page.locator(`input[type="checkbox"][value="${device.id}"]`).check();
@@ -74,7 +77,7 @@ test('新闻关注：验证、保存、刷新保留草稿、键盘、窄屏与�
   await page.getByRole('button', { name: '保存新闻推送设置' }).click();
   await expect(page.getByRole('status')).toContainText('新闻推送已暂停');
   await page.getByRole('button', { name: '连接或管理通知设备' }).click();
-  await expect(page.getByRole('heading', { name: '验证工作台', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '开发者功能', exact: true })).toBeVisible();
 });
 
 test('新闻通知记录区分接受和回执，点击记录或通知哈希打开详情', async ({ page }) => {
@@ -135,15 +138,19 @@ test('新闻通知记录区分接受和回执，点击记录或通知哈希打�
       },
     }),
   );
-  await page.getByRole('button', { name: '刷新推送记录' }).click();
-  const records = page.getByRole('region', { name: '新闻通知记录' });
+  await page.getByRole('link', { name: '查看报道通知记录' }).click();
+  const records = page.getByRole('region', { name: '报道通知记录' });
   await expect(records.getByText('推送服务已接受', { exact: true })).toBeVisible();
   await expect(records.getByText('设备已回执', { exact: true })).toHaveCount(0);
   await records.getByRole('link', { name: '测试：降准修订' }).focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('#news-detail-heading')).toBeFocused();
   await expect(page.getByText('本地通知跳转测试原文', { exact: true })).toBeVisible();
-  await page.getByRole('link', { name: '关注与推送', exact: true }).click();
+  await page.getByRole('button', { name: /返回报道通知记录/ }).click();
+  await expect(page.getByRole('heading', { name: '报道通知记录', exact: true })).toBeFocused();
+  await expect(records.getByText('推送服务已接受', { exact: true })).toBeVisible();
+  await page.getByRole('link', { name: '设置', exact: true }).click();
+  await page.getByRole('link', { name: '报道关注与推送', exact: true }).click();
   await page.goto('./#news=321');
   await expect(page.locator('#news-detail-heading')).toBeFocused();
   await expect(page.getByText('本地通知跳转测试原文', { exact: true })).toBeVisible();
@@ -155,7 +162,7 @@ test('新闻设置读取失败可重试，未保存关注不被后台刷新覆�
     route.fulfill({ status: 503, json: { error: '测试：服务暂时不可用' } }),
   );
   await page.getByLabel('宏观经济', { exact: true }).check();
-  await page.getByRole('button', { name: '刷新推送记录' }).click();
+  await page.getByRole('button', { name: '刷新推送状态' }).click();
   await expect(page.getByRole('alert')).toContainText('测试：服务暂时不可用');
   await expect(page.getByLabel('宏观经济', { exact: true })).toBeChecked();
   await page.unroute(`**${endpoint}`);

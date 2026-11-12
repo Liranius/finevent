@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref } from 'vue';
-import { RouterLink } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import { api, ApiError } from '../api';
 import { beijingDay, eventOrigin, eventTime, states, type CalendarEvent } from '../calendar';
@@ -9,6 +9,33 @@ import { newsTime, safeNewsURL, sourceName, type NewsEntry } from '../news';
 
 const props = defineProps<{ news?: NewsEntry; event?: CalendarEvent }>();
 const emit = defineEmits<{ expired: []; reload: [] }>();
+const route = useRoute();
+const router = useRouter();
+function destination(link: CalendarLink) {
+  const target = props.news
+    ? { name: 'calendar-event', params: { id: link.event.id } }
+    : { name: 'news-detail', params: { id: link.news.id } };
+  return { ...target, state: { linkedFrom: route.fullPath } };
+}
+function followRelated(
+  event: MouseEvent,
+  link: CalendarLink,
+  navigate: (event: MouseEvent) => Promise<unknown>,
+) {
+  const { linkedFrom, back } = router.options.history.state;
+  if (
+    event.button === 0 &&
+    !event.ctrlKey &&
+    !event.metaKey &&
+    !event.altKey &&
+    !event.shiftKey &&
+    back === linkedFrom &&
+    back === router.resolve(destination(link)).fullPath
+  ) {
+    event.preventDefault();
+    router.back();
+  } else void navigate(event);
+}
 const links = ref<CalendarLinkPage | null>(null);
 const error = ref('');
 const notice = ref('');
@@ -164,15 +191,11 @@ onUnmounted(() => {
     </p>
     <ul v-if="links" class="plain-list">
       <li v-for="link in links.items" :key="link.id">
-        <RouterLink
-          class="news-related-link"
-          :to="
-            news
-              ? { name: 'calendar-event', params: { id: link.event.id } }
-              : { name: 'news-detail', params: { id: link.news.id } }
-          "
-          >{{ news ? link.event.title : link.news.title }}</RouterLink
-        >
+        <RouterLink v-slot="{ href, navigate }" custom :to="destination(link)">
+          <a class="news-related-link" :href="href" @click="followRelated($event, link, navigate)">
+            {{ news ? link.event.title : link.news.title }}
+          </a>
+        </RouterLink>
         <p class="caption">
           {{
             news

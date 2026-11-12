@@ -5,6 +5,7 @@ import { aiState, yuan, type AIJob, type AIOverview } from '../ai';
 import { api, ApiError } from '../api';
 import { newsTime } from '../news';
 import AnalysisResult from './AnalysisResult.vue';
+defineProps<{ recordsOnly?: boolean }>();
 const emit = defineEmits<{ expired: [] }>();
 const info = ref<AIOverview | null>(null),
   selected = ref<AIJob | null>(null);
@@ -91,19 +92,21 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="ai-workspace" aria-label="AI 解读设置">
+  <section class="ai-workspace" :aria-label="recordsOnly ? 'AI 解读记录' : 'AI 设置与预算'">
     <div class="page-heading">
       <div>
-        <span class="eyebrow">INTERPRETATION RECORD</span>
-        <h1 id="ai-heading" tabindex="-1">AI 解读</h1>
-        <p class="intro">保留事实依据，逐个对象看影响条件。</p>
+        <h1 id="ai-heading" tabindex="-1">{{ recordsOnly ? 'AI 解读记录' : 'AI 设置与预算' }}</h1>
       </div>
-      <button :disabled="busy" @click="refresh(true)">刷新用量</button>
+      <button :disabled="busy" @click="refresh(true)">
+        {{ recordsOnly ? '刷新解读记录' : '刷新用量' }}
+      </button>
     </div>
     <p v-if="error" class="message error" role="alert">{{ error }}</p>
     <p v-if="notice" class="message" role="status">{{ notice }}</p>
-    <p v-if="!info && !error" role="status">正在读取设置与预算…</p>
-    <div v-if="info" class="ai-settings-grid">
+    <p v-if="!info && !error" role="status">
+      {{ recordsOnly ? '正在读取解读记录…' : '正在读取设置与预算…' }}
+    </p>
+    <div v-if="info && !recordsOnly" class="ai-settings-grid">
       <form @submit.prevent="save" @input="dirty = true" @change="dirty = true">
         <h2>解读范围</h2>
         <p v-if="!info.configured" class="message">
@@ -156,7 +159,7 @@ onUnmounted(() => {
         </p>
       </aside>
     </div>
-    <section v-if="info" class="ai-history" aria-label="最近解读任务">
+    <section v-if="info && recordsOnly" class="ai-history" aria-label="最近解读任务">
       <h2>最近解读记录</h2>
       <p v-if="!info.recent.length">尚无解读任务。启用后可在新闻详情请求。</p>
       <ul class="plain-list">
@@ -171,7 +174,7 @@ onUnmounted(() => {
       </ul>
       <p v-if="info.recent.length" class="caption">列出最近 20 项。解读及输入快照保留一年。</p>
     </section>
-    <section v-if="selected" class="ai-history-detail" aria-label="历史解读内容">
+    <section v-if="recordsOnly && selected" class="ai-history-detail" aria-label="历史解读内容">
       <h2 id="ai-history-heading" tabindex="-1">{{ selected.evidence[0]?.title || '解读记录' }}</h2>
       <AnalysisResult :job="selected" />
     </section>
