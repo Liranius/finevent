@@ -197,6 +197,14 @@ GitHub 的 `production` environment 仅允许 `main` 分支，配置三个 envir
 
 若最新部署明确在安装前失败，审核原报告后可同时传入 `-RecoverPreflight <失败ID>`、`-FailedReportSha256 <报告摘要>`，`-AfterReview` 仍指向前一个已完成验收的操作；Actions 使用相应的 snake_case 参数。仅接受已停止、未进入安装、无安装/回滚/观察替换痕迹的 calendar/news 失败；重新复核原前序验收及当前版本，保留失败记录，以新 ID 登记恢复操作。报告变化、进程仍活动、安装结果不明或 AI 初始化失败均不能用此入口放行。服务端控制器需升级到协议 2：沿用已有专用密钥再次运行初始化脚本即可，不改变生产应用。
 
+若日历部署的验收进程发生 OOM，原报告停在 `deploying/install`，可从已完成的安装继续。先用 Report 核对操作 ID、提交和原报告摘要，再在管理终端运行：
+
+```powershell
+./scripts/resume-calendar-acceptance.ps1 -RunId <原操作ID> -Commit <完整提交SHA> -ReportSha256 <原报告SHA256>
+```
+
+该入口通过管理 SSH 上传验收工具，沿用原操作和 systemd 单元。它核对当前二进制、已登记的发布清单、安装器成功报告和冻结备份，保存原报告与 OOM 记录，在临时数据库验证备份，再执行一次服务重启和完整的 6 小时 15 分钟观察。窗口从补验开始计时，原预检计数与验收进程的 OOM 保留在报告中。正在执行和已完成的操作都不会再次重启应用。继续用同一 ID 查询 Report；若补验失败，核对实际失败阶段和服务器证据。
+
 ### 原验证版安装与共用机制
 
 在项目根目录使用 PowerShell：

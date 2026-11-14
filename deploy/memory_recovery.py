@@ -41,7 +41,11 @@ def save(path, value):
 
 
 def sha(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    digest = hashlib.sha256()
+    with path.open('rb') as stream:
+        for block in iter(lambda: stream.read(256 * 1024), b''):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def meminfo():

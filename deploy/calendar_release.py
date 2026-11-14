@@ -187,16 +187,22 @@ def preflight(directory, baseline_id=None, baseline_sha256=None):
         persistence_baseline.validate_current(renewed, current)
     counters = accepted['resources']['baseline_counters']
     with closing(readonly(DATA/'finevent.db')) as conn:
-        rows = list(conn.execute('SELECT at,available,oom_kills FROM resources WHERE at>=? ORDER BY at', (int(finished),)))
-    require(rows and rows[0]['at'] <= finished+180 and time.time()-rows[-1]['at'] <= 180
-            and all(row['available'] >= 64*MIB and row['oom_kills'] == counters['finevent_oom_kill'] for row in rows)
-            and all(b['at']-a['at'] <= 180 for a, b in zip(rows, rows[1:])),
-            'Post-persistence memory history is incomplete or shows pressure')
+        history = conn.execute('SELECT at,available,oom_kills FROM resources WHERE at>=? ORDER BY at', (int(finished),))
+        count = 0
+        previous_at = finished
+        minimum = None
+        for at, available, oom_kills in history:
+            require(at-previous_at <= 180 and available >= 64*MIB and oom_kills == counters['finevent_oom_kill'],
+                    'Post-persistence memory history is incomplete or shows pressure')
+            previous_at = at
+            minimum = available if minimum is None else min(minimum, available)
+            count += 1
+        require(count and time.time()-previous_at <= 180, 'Post-persistence memory history is incomplete or shows pressure')
     backup = directory/'before.db'
     checksum = snapshot(DATA/'finevent.db', backup)
     return {'status': 'passed', 'persistence_id': PERSIST_ID, 'report_sha256': recovery.sha(evidence/'report.json'),
             **current, 'renewed_baseline': {'id': baseline_id, 'report_sha256': baseline_sha256} if baseline_id else None,
-            'history_samples': len(rows), 'history_available_min_mib': min(r['available'] for r in rows)/MIB,
+            'history_samples': count, 'history_available_min_mib': minimum/MIB,
             'database_snapshot_sha256': checksum}
 
 
@@ -382,7 +388,7 @@ def validate_live_predecessor(previous):
     require(pid == previous['restart']['after_pid'], 'finevent process changed before observer replacement')
     current = target()
     validate_target(current, previous['preflight']['container'], parent_metrics())
-    check_sample(sample(current, pid), previous['preflight']['baseline'])
+    check_sample(sample(current, pid), observation_baseline(previous))
     require(recovery.sha(DATA/'config.json') == previous['preflight']['config_sha256'], 'finevent configuration changed before observer replacement')
 
 
@@ -492,6 +498,12 @@ def check_sample(row, baseline):
     require(row['finevent_current'] <= 96*MIB, 'finevent exceeds its 96 MiB limit')
 
 
+def observation_baseline(report):
+    if 'acceptance_recovery' in report:
+        return report['acceptance_recovery']['baseline']
+    return report['preflight']['baseline']
+
+
 def verify_restart(before, after):
     # No scheduled source is due during this short intentional restart.
     require(before == after, 'Calendar data, reminder settings/job identities or durable cursors changed across restart')
@@ -510,7 +522,7 @@ def restart_check(directory, report, current):
     after = calendar_state()
     verify_restart(before, after)
     row = sample(current, pid)
-    check_sample(row, report['preflight']['baseline'])
+    check_sample(row, observation_baseline(report))
     return {'status': 'passed', 'before_pid': old_pid, 'after_pid': pid, 'calendar': after,
             'host_reboot_tested': False}
 
@@ -568,7 +580,7 @@ def observe(directory, report, current):
     pid = service_pid()
     identities = recovery.process_identity(current['pid']), recovery.process_identity(pid)
     baseline = sample(current, pid)
-    check_sample(baseline, report['preflight']['baseline'])
+    check_sample(baseline, observation_baseline(report))
     first = report['initial_calendar']
     started = int(time.time())
     end = started+OBSERVATION_SECONDS
@@ -613,6 +625,40 @@ def resource_summary(samples, baseline):
             'finevent_rss_peak_mib': max(r['finevent_rss'] for r in samples)/MIB}
 
 
+def verify_installed(directory, report, backup, transition):
+    release = str((ROOT/'current').resolve())
+    report['deployment'] = {'backup': str(backup), 'release': release,
+                            'rollback_command': f'python3 {report.get("runner", str(Path(__file__).resolve()))} --run-id {report["id"]} --rollback'}
+    # Read the frozen pre-deploy copy and restore it to a disposable DB, never to live data.
+    restore_name = 'restore-check-resumed.db' if 'acceptance_recovery' in report else 'restore-check.db'
+    backup_sha = snapshot(backup/'database.db', directory/restore_name)
+    report['backup_verification'] = {'status': 'passed', 'restored_copy_sha256': backup_sha}
+    current = target()
+    validate_target(current, report['preflight']['container'], parent_metrics())
+    report['stage'] = 'initial_calendar'
+    recovery.save(directory/'report.json', report)
+    report['initial_calendar'] = wait_initial_sources(directory, report, current)
+    with closing(readonly(backup/'database.db')) as old_db:
+        report['reminder_migration'] = verify_reminder_migration(
+            reminder_state(old_db), report['initial_calendar']['reminders'])
+    if report.get('verification_profile') == 'ai':
+        ai_release.prepare(directory, report, current, backup)
+    elif report.get('verification_profile') == 'news':
+        import news_release
+        news_release.prepare(directory, report, current, backup)
+    else:
+        report['restart'] = restart_check(directory, report, current)
+    report['stage'] = 'ready_for_user_checks'
+    recovery.save(directory/'report.json', report)
+    transition.close()
+    if report.get('verification_profile') == 'ai':
+        ai_release.observe(directory, report, current)
+    elif report.get('verification_profile') == 'news':
+        news_release.observe(directory, report, current)
+    else:
+        observe(directory, report, current)
+
+
 def run(directory, report):
     import fcntl
     with LOCK.open('a') as lock:
@@ -643,36 +689,7 @@ def run(directory, report):
                 report['installer_evidence'] = str(backup)
                 recovery.save(directory/'report.json', report)
             backup = installer.install(evidence_callback=checkpoint)
-            release = str((ROOT/'current').resolve())
-            report['deployment'] = {'backup': str(backup), 'release': release,
-                                    'rollback_command': f'python3 {Path(__file__).resolve()} --run-id {report["id"]} --rollback'}
-            # Read the frozen pre-deploy copy and restore it to a disposable DB, never to live data.
-            backup_sha = snapshot(backup/'database.db', directory/'restore-check.db')
-            report['backup_verification'] = {'status': 'passed', 'restored_copy_sha256': backup_sha}
-            current = target()
-            validate_target(current, report['preflight']['container'], parent_metrics())
-            report['stage'] = 'initial_calendar'
-            recovery.save(directory/'report.json', report)
-            report['initial_calendar'] = wait_initial_sources(directory, report, current)
-            with closing(readonly(backup/'database.db')) as old_db:
-                report['reminder_migration'] = verify_reminder_migration(
-                    reminder_state(old_db), report['initial_calendar']['reminders'])
-            if report.get('verification_profile') == 'ai':
-                ai_release.prepare(directory, report, current, backup)
-            elif report.get('verification_profile') == 'news':
-                import news_release
-                news_release.prepare(directory, report, current, backup)
-            else:
-                report['restart'] = restart_check(directory, report, current)
-            report['stage'] = 'ready_for_user_checks'
-            recovery.save(directory/'report.json', report)
-            transition.close()
-            if report.get('verification_profile') == 'ai':
-                ai_release.observe(directory, report, current)
-            elif report.get('verification_profile') == 'news':
-                news_release.observe(directory, report, current)
-            else:
-                observe(directory, report, current)
+            verify_installed(directory, report, backup, transition)
         except BaseException as error:
             report.update(status='incomplete', failure_type=type(error).__name__, finished_at=stamp())
             # Exceptions contain fixed gate messages; subprocess stderr/private configurations are never exported.

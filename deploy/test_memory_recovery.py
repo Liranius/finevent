@@ -1,14 +1,36 @@
 import json
+import hashlib
 from pathlib import Path
 import tempfile
+import tracemalloc
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 import memory_recovery as recovery
+import install
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_database_checksums_have_bounded_memory(self):
+        block = bytes(range(256)) * 4096
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp)/'snapshot.db'
+            digest = hashlib.sha256()
+            with path.open('wb') as output:
+                for _ in range(12):
+                    output.write(block)
+                    digest.update(block)
+            for checksum in (recovery.sha, install.sha):
+                with self.subTest(checksum=checksum.__module__):
+                    tracemalloc.start()
+                    try:
+                        self.assertEqual(checksum(path), digest.hexdigest())
+                        self.assertLess(tracemalloc.get_traced_memory()[1], 2*1024**2)
+                    finally:
+                        tracemalloc.stop()
+            self.assertIsNone(install.sha(path.with_name('missing')))
+
     def test_docker_configuration_is_not_proof_of_effective_swap_limit(self):
         target = {'memory': recovery.MEMORY, 'memory_swap': recovery.TOTAL_MEMORY_SWAP,
                   'cgroup': {'memory.max': recovery.MEMORY, 'memory.swap.max': 'max'}}
