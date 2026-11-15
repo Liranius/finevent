@@ -31,6 +31,55 @@ def evidence():
             'first_sample_at': 100000, 'last_sample_at': 103900}
 
 
+class PersistenceOomTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.backups = Path(temporary.name)
+        self.counters = {'host_oom_kill': 19, 'finevent_oom_kill': 0, 'trend_oom_kill': 0}
+        self.accepted = {'id': calendar.PERSIST_ID, 'resources': {'baseline_counters': self.counters}}
+        self.live = {**self.counters, 'host_oom_kill': 20}
+        review = calendar.REVIEWED_OBSERVER_OOM.copy()
+        self.files = []
+        for run_id, payload, digest_key in ((self.accepted['id'], self.accepted, 'persistence_sha256'),
+                                            (review['operation_id'], {'id': review['operation_id']}, 'report_sha256')):
+            path = self.backups/run_id/'report.json'
+            path.parent.mkdir()
+            path.write_text(json.dumps(payload), encoding='utf-8')
+            review[digest_key] = calendar.recovery.sha(path)
+            self.files.append(path)
+        for patcher in (patch.object(calendar, 'BACKUPS', self.backups),
+                        patch.object(calendar, 'REVIEWED_OBSERVER_OOM', review)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_only_the_exact_reviewed_host_increment_survives_repeated_preflights(self):
+        for _ in range(2):
+            calendar.check_persistence_oom(self.accepted, self.live)
+        self.assertEqual(self.counters['host_oom_kill'], 19)
+        for key, value in (('host_oom_kill', 21), ('host_oom_kill', 19), ('host_oom_kill', 0),
+                           ('finevent_oom_kill', 1), ('trend_oom_kill', 1)):
+            with self.subTest(key=key, value=value), self.assertRaisesRegex(RuntimeError, 'OOM counters'):
+                calendar.check_persistence_oom(self.accepted, {**self.live, key: value})
+
+    def test_missing_or_changed_evidence_blocks_even_with_the_expected_counts(self):
+        for path in self.files:
+            original = path.read_bytes()
+            path.unlink()
+            with self.subTest(path=path.parent.name, reason='missing'), self.assertRaisesRegex(RuntimeError, 'evidence'):
+                calendar.check_persistence_oom(self.accepted, self.live)
+            path.write_bytes(original + b' ')
+            with self.subTest(path=path.parent.name, reason='changed'), self.assertRaisesRegex(RuntimeError, 'evidence'):
+                calendar.check_persistence_oom(self.accepted, self.live)
+            path.write_bytes(original)
+
+    def test_other_persistence_operations_still_require_exact_original_counts(self):
+        other = {**self.accepted, 'id': 'different-persistence-operation'}
+        calendar.check_persistence_oom(other, self.counters)
+        with self.assertRaisesRegex(RuntimeError, 'OOM counters'):
+            calendar.check_persistence_oom(other, self.live)
+
+
 class BaselineTests(unittest.TestCase):
     def test_fresh_evidence_requires_full_window_resources_sources_and_origin(self):
         good = evidence()

@@ -28,6 +28,13 @@ DATA = Path('/srv/example/finevent-data')
 BACKUPS = Path('/srv/example/finevent-backups')
 TREND = Path('/srv/example/trendradar/output')
 PERSIST_ID = 'trendradar-persist-20261030T083232Z-9cf5305a'
+# Frozen evidence for the single reviewed 64 MiB observer death (host counter 19 -> 20).
+REVIEWED_OBSERVER_OOM = {
+    'persistence_id': 'trendradar-persist-20261030T083232Z-9cf5305a',
+    'persistence_sha256': '2569bcc537d873c921276031e0056fa06e217cc1804f175ad33350ed9a7e2050',
+    'operation_id': 'calendar-release-20261113T165023Z-919811a8',
+    'report_sha256': '50f6aa4253734b08dd770e207fef23fd433865aec585145cdb4c35f80807d986',
+}
 CONTAINER = 'ceb3b0967e820890eff6f3c149fb010d8201f6f71b291757515bb57cabc6f134'
 IMAGE = 'sha256:da2e26b6811b714180f1c2ee72fc0f4ff76ca8ea676847fc23c80bb35e02f536'
 PATCH_SHA = 'c405f46e99559221b8e082f8165a96c7b08122c9ab66656ac9aa33feefc39b45'
@@ -136,6 +143,21 @@ def validate_report(report, now):
     return finished
 
 
+def check_persistence_oom(accepted, live):
+    counters = accepted['resources']['baseline_counters']
+    review = REVIEWED_OBSERVER_OOM
+    if accepted['id'] == review['persistence_id']:
+        for run_id, digest in ((accepted['id'], review['persistence_sha256']),
+                               (review['operation_id'], review['report_sha256'])):
+            path = BACKUPS/run_id/'report.json'
+            require(path.is_file() and recovery.sha(path) == digest, 'Reviewed observer OOM evidence missing or changed')
+        # Apply the one historical increment to the frozen counters on every check.
+        # Never accumulate an allowance or move the baseline to the current sample.
+        counters = {**counters, 'host_oom_kill': counters['host_oom_kill'] + 1}
+    require(all(live[key] == counters[key] for key in ('host_oom_kill', 'finevent_oom_kill', 'trend_oom_kill')),
+            'OOM counters changed or reset after the accepted report')
+
+
 def inspect_persistence(accepted):
     """Read current invariants without installing, backing up or changing services."""
     evidence = BACKUPS/PERSIST_ID
@@ -165,8 +187,7 @@ def inspect_persistence(accepted):
             'At least 1 GiB free space is required for release and backups')
     pid = service_pid()
     baseline = sample(current, pid)
-    counters = accepted['resources']['baseline_counters']
-    require(all(baseline[key] == counters[key] for key in counters), 'OOM counters changed or reset after the accepted report')
+    check_persistence_oom(accepted, baseline)
     require(baseline['available'] >= 128*MIB, 'Less than 128 MiB current host headroom')
     return {'previous_release': str(previous), 'baseline': baseline, 'container': current,
             'config_sha256': recovery.sha(DATA/'config.json'), 'finevent_pid': pid}

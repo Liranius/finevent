@@ -197,6 +197,8 @@ GitHub 的 `production` environment 仅允许 `main` 分支，配置三个 envir
 
 若最新部署明确在安装前失败，审核原报告后可同时传入 `-RecoverPreflight <失败ID>`、`-FailedReportSha256 <报告摘要>`，`-AfterReview` 仍指向前一个已完成验收的操作；Actions 使用相应的 snake_case 参数。仅接受已停止、未进入安装、无安装/回滚/观察替换痕迹的 calendar/news 失败；重新复核原前序验收及当前版本，保留失败记录，以新 ID 登记恢复操作。报告变化、进程仍活动、安装结果不明或 AI 初始化失败均不能用此入口放行。服务端控制器需升级到协议 2：沿用已有专用密钥再次运行初始化脚本即可，不改变生产应用。
 
+部署预检与只读基线复验按原固化报告核对 OOM 计数。对 `calendar-release-…` 已确认的验收进程 OOM，两份报告的 SHA-256 均匹配时才承认主机计数从 19 变为 20。此后计数增加或回退、Finevent 或 TrendRadar 计数变化，均会阻止验收。
+
 若日历部署的验收进程发生 OOM，原报告停在 `deploying/install`，可从已完成的安装继续。先用 Report 核对操作 ID、提交和原报告摘要，再在管理终端运行：
 
 ```powershell
