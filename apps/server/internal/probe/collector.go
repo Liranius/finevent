@@ -299,6 +299,15 @@ func (a *App) CollectTrend(root string) Poll {
 		}
 		if time.Now().Unix()-latest > 40*60 {
 			p.Gap = "TrendRadar 最新条目采集超过 40 分钟，请检查上游定时任务"
+			if a.TrendSettingsSocket != "" {
+				periods, e := a.sourcePeriods(context.Background())
+				if e == nil {
+					expected := enabledAt(periods, p.Started-p.Started%1800)
+					if expected != nil && len(expected) == 0 {
+						p.Gap = ""
+					}
+				}
+			}
 		}
 	}
 	p.Completed = time.Now().Unix()

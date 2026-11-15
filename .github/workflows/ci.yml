@@ -92,7 +92,9 @@ jobs:
       - name: Deployment tests
         id: deployment
         run: |
-          python3 -m unittest discover -s deploy -p 'test_*.py'
+          python3 -m venv "$RUNNER_TEMP/finevent-deploy-tests"
+          "$RUNNER_TEMP/finevent-deploy-tests/bin/pip" install PyYAML==6.0.3
+          "$RUNNER_TEMP/finevent-deploy-tests/bin/python" -m unittest discover -s deploy -p 'test_*.py'
           pwsh -NoProfile -NonInteractive -File scripts/test-deployment-config.ps1
 
       - name: Install Chromium

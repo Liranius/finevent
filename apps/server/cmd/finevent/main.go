@@ -102,6 +102,7 @@ func main() {
 	}
 	app.CollectionEnabled = *collect
 	app.TrendEnabled = *trend != ""
+	app.TrendSettingsSocket = os.Getenv("FINEVENT_TREND_SETTINGS_SOCKET")
 	app.ProbeRequestPath = filepath.Join(*dir, "ai-probe-request.json")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

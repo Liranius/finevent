@@ -26,22 +26,23 @@ import (
 const prefix = "/finevent/api/v1/"
 
 type App struct {
-	Config            Config
-	Store             *Store
-	Client            *http.Client
-	CalendarClient    *http.Client
-	Web               string
-	CollectionEnabled bool
-	TrendEnabled      bool
-	ProbeRequestPath  string
-	AIConfig          AIConfig
-	AIClient          *http.Client
-	analysisWake      chan struct{}
-	aiProbeMu         sync.Mutex
-	aiProbeWorkers    sync.WaitGroup
-	loginMu           sync.Mutex
-	loginAttempts     int
-	loginWindow       time.Time
+	Config              Config
+	Store               *Store
+	Client              *http.Client
+	CalendarClient      *http.Client
+	Web                 string
+	CollectionEnabled   bool
+	TrendEnabled        bool
+	TrendSettingsSocket string
+	ProbeRequestPath    string
+	AIConfig            AIConfig
+	AIClient            *http.Client
+	analysisWake        chan struct{}
+	aiProbeMu           sync.Mutex
+	aiProbeWorkers      sync.WaitGroup
+	loginMu             sync.Mutex
+	loginAttempts       int
+	loginWindow         time.Time
 }
 
 func NewApp(c Config, s *Store, web string) *App {
@@ -105,6 +106,7 @@ func (a *App) Handler() http.Handler {
 	a.reminderRoutes(m)
 	a.newsRoutes(m)
 	a.sourceHealthRoutes(m)
+	a.trendSettingsRoutes(m)
 	a.newsPushRoutes(m)
 	a.analysisRoutes(m)
 	m.HandleFunc("GET /finevent/healthz", func(w http.ResponseWriter, r *http.Request) {

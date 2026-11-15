@@ -16,6 +16,14 @@ func (a *App) sourceHealthRoutes(m *http.ServeMux) {
 		}
 		result.CollectionEnabled = a.CollectionEnabled
 		result.TrendEnabled = a.TrendEnabled
+		if a.TrendSettingsSocket != "" {
+			periods, err := a.sourcePeriods(r.Context())
+			if err != nil {
+				result.ConfigError = "无法核对启用的来源，以下为采集记录。"
+			} else {
+				applySourcePeriods(&result, periods)
+			}
+		}
 		writeJSON(w, 200, result)
 	})
 	m.HandleFunc("GET "+prefix+"news/source-failures", func(w http.ResponseWriter, r *http.Request) {

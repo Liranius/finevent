@@ -1,0 +1,20 @@
+[Unit]
+Description=Finevent TrendRadar settings request
+
+[Service]
+ExecStart=/usr/bin/python3 -IB /srv/example/finevent/current/deploy/trend_settings.py
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+StateDirectory=finevent-trend-settings
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/srv/example/trendradar/config
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_CHOWN CAP_FOWNER
+MemoryMax=48M
+RuntimeMaxSec=12

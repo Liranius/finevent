@@ -128,3 +128,105 @@
     padding-inline: 4px;
   }
 }
+
+.trend-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
+  gap: 24px;
+  margin-block: 24px;
+}
+
+.trend-settings fieldset {
+  min-width: 0;
+  border: 0;
+  border-top: 1px solid var(--rule);
+  padding: 12px 0;
+  margin: 0;
+}
+
+.trend-settings legend {
+  font-size: 1.2rem;
+  font-weight: 650;
+  padding-right: 12px;
+}
+
+.trend-source-option,
+.trend-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trend-settings .trend-source-option {
+  min-height: 44px;
+  margin: 0;
+}
+
+.trend-source-option input {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+.trend-actions {
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+.trend-settings textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.keyword-help-label,
+.keyword-help-card header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.keyword-help-label label {
+  margin: 0;
+}
+
+.keyword-help-button {
+  min-width: 44px;
+  min-height: 44px;
+  color: var(--muted);
+}
+
+.keyword-help-card {
+  width: min(30rem, 100%);
+  padding: 16px 24px 24px;
+  color: var(--ink);
+  background: var(--surface);
+}
+
+.keyword-help-card header {
+  justify-content: space-between;
+}
+
+.keyword-help-card h2 {
+  font-size: 1.25rem;
+}
+
+.keyword-help-card h3 {
+  font-size: 1rem;
+}
+
+.keyword-help-card p {
+  margin: 12px 0;
+}
+
+.keyword-help-card pre {
+  margin: 8px 0;
+  padding: 12px 16px;
+  background: var(--input);
+  border-radius: 6px;
+  line-height: 1.4;
+}
+
+@media (width <= 640px) {
+  .trend-settings {
+    grid-template-columns: 1fr;
+  }
+}

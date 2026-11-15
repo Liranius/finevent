@@ -53,6 +53,11 @@ const groups = [
     icon: outlinedRssFeed,
     entries: [
       {
+        label: 'TrendRadar 设置',
+        description: '启停新闻来源，编辑日报关键词',
+        to: { name: 'trendradar-settings' },
+      },
+      {
         label: '采集通道状态',
         description: '查看报道来源的最近采集、失败与缺口',
         to: { name: 'news-channels' },

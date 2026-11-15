@@ -19,14 +19,16 @@ def report_sha(report):
 
 def followup_accepted(entry, review, started, finished, inspected):
     scope = entry.get('followup_scope', 'all_after_observation')
-    if scope == 'all_after_observation':
+    snapshots = review.get('original_trendradar', {}).get('expected_by_cycle')
+    dynamic = snapshots is not None
+    if scope == 'all_after_observation' and not dynamic:
         return review.get('followup_cycles', 0) >= 2 and review.get('followup_source_failures') == []
-    if scope != 'first_two_after_observation':
+    if scope not in ('first_two_after_observation', 'all_after_observation'):
         return False
 
     # Opt-in per reviewed release; older approvals keep their original scope.
     expected = entry.get('expected_sources', [])
-    if (len(expected) != 9 or not all(isinstance(s, str) and s for s in expected)
+    if not dynamic and (len(expected) != 9 or not all(isinstance(s, str) and s for s in expected)
             or len(set(expected)) != 9 or set(review.get('source_latest', {})) != set(expected)):
         return False
     cycles = review.get('cycles', [])
@@ -41,8 +43,14 @@ def followup_accepted(entry, review, started, finished, inspected):
     if (len(observed) != review.get('observation_cycles')
             or len(followup) != review.get('followup_cycles') or len(followup) < 2):
         return False
-    window = followup[:2]  # Never skip a failed or incomplete cycle to find later successes.
+    window = followup[:2] if scope == 'first_two_after_observation' else followup
     for cycle in observed + window:
+        if dynamic:
+            expected = cycle.get('expected_sources')
+            if not isinstance(expected, list) or len(set(expected)) != len(expected):
+                return False
+            if cycle['at'] <= finished and expected != snapshots.get(str(cycle['at'])):
+                return False
         sources = cycle.get('sources', [])
         if (len(sources) != len(expected) or any(not isinstance(s, dict) for s in sources)
                 or {s.get('platform_id') for s in sources} != set(expected)
@@ -67,6 +75,17 @@ def accepted(report, raw):
     started = datetime.fromisoformat(report['observation_started']).timestamp()
     finished = datetime.fromisoformat(report['finished_at']).timestamp()
     inspected = datetime.fromisoformat(review['inspected_at']).timestamp()
+    if 'expected_by_cycle' in trend:
+        if review.get('original_trendradar') != trend or not review.get('cycles'):
+            return False
+        last = max(review['cycles'], key=lambda c: c['at'])
+        ids = last.get('expected_sources')
+        if not isinstance(ids, list) or sorted(s['platform_id'] for s in last['sources']) != sorted(ids):
+            return False
+        latest = {s: latest[s] for s in ids if s in latest}
+        latest_complete = len(latest) == len(ids)
+    else:
+        latest_complete = len(latest) == 9  # Previously signed reports used the fixed nine-source baseline.
     return (review.get('id') == entry.get('review_id') and review.get('release_id') == report['id']
             and review.get('original_report_sha256') == entry['report_sha256']
             and review.get('status') == 'completed_for_review' and not review.get('failure')
@@ -78,7 +97,7 @@ def accepted(report, raw):
             and all(f.get('latest_success') is True and (f.get('first_later_success') or {}).get('status') == 'success'
                     and 0 < f['first_later_success']['at']-f['at'] <= 1800 for f in failures)
             and followup_accepted(entry, review, started, finished, inspected)
-            and len(latest) == 9 and all(s.get('status') == 'success' and finished < s.get('at', 0) <= inspected
+            and latest_complete and all(s.get('status') == 'success' and finished < s.get('at', 0) <= inspected
                                        and inspected-s['at'] <= 3600 for s in latest.values())
             and trend.get('polls', 0) > 0 and trend.get('poll_failures') == 0
             and 0 <= finished-trend.get('last_import', 0) <= 180

@@ -18,7 +18,9 @@ const historyError = ref('');
 const source = ref('');
 const historyHeading = ref<HTMLElement | null>(null);
 const attention = computed(
-  () => health.value?.sources.filter((s) => s.state !== 'healthy').length ?? 0,
+  () =>
+    health.value?.sources.filter((s) => !['healthy', 'disabled', 'pending'].includes(s.state))
+      .length ?? 0,
 );
 let disposed = false;
 let historyRequest = 0;
@@ -116,6 +118,9 @@ onUnmounted(() => {
     </p>
     <p v-if="!health && !error && !pollError" class="empty" role="status">正在读取来源记录…</p>
     <template v-if="health">
+      <p v-if="health.config_error" role="alert" class="message warning">
+        {{ health.config_error }}
+      </p>
       <p v-if="!health.collection_enabled || !health.trendradar_enabled" class="message">
         来源状态采样未启用；已有记录仅供回看。
       </p>
@@ -128,12 +133,22 @@ onUnmounted(() => {
       <div class="source-health-overview">
         <strong :class="{ warning: attention > 0 }">{{
           health.sources.length
-            ? `${health.sources.length} 个已观察来源 · ${attention} 项需核查`
+            ? health.config_known
+              ? `${health.sources.filter((s) => s.state !== 'disabled' && s.state !== 'unexpected').length} 个启用来源 · ${attention} 项需核查`
+              : `${health.sources.length} 个已观察来源 · ${attention} 项需核查`
             : '尚无来源状态记录'
         }}</strong>
         <span>最新采集轮次 {{ newsTime(health.latest_cycle) }}</span>
         <span>状态读取成功 {{ newsTime(health.read_success) }}</span>
       </div>
+      <p v-if="health.config_known && health.latest_cycle" class="caption">
+        最近一轮有记录的来源：{{
+          health.sources
+            .filter((s) => s.last_attempt === health?.latest_cycle)
+            .map((s) => sourceName(s.id))
+            .join('、') || '无'
+        }}
+      </p>
       <p v-for="warning in health.warnings" :key="warning" class="caption warning">{{ warning }}</p>
       <p v-if="!health.sources.length" class="empty">
         等待有来源明细的采集轮次；没有记录不表示采集正常。
@@ -148,7 +163,9 @@ onUnmounted(() => {
                   ? 'error'
                   : item.state === 'healthy'
                     ? 'source-healthy'
-                    : 'warning'
+                    : ['pending', 'disabled'].includes(item.state)
+                      ? 'caption'
+                      : 'warning'
               "
               >{{ sourceStateName[item.state] }}</span
             >

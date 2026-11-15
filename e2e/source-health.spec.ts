@@ -104,6 +104,9 @@ async function loginSources(page: Page) {
   await page.getByRole('link', { name: '设置', exact: true }).click();
   await page.getByRole('link', { name: '设备、测试通知与诊断', exact: true }).click();
   await page.getByRole('button', { name: '02 采集时效' }).click();
+  await expect(page.getByRole('heading', { name: '消息多久抵达？' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'TrendRadar 来源健康' })).toHaveCount(0);
+  await page.getByRole('link', { name: '查看采集通道状态' }).click();
   await expect(page.getByRole('heading', { name: 'TrendRadar 来源健康' })).toBeVisible();
 }
 

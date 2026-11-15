@@ -6,9 +6,11 @@ import { api, ApiError } from '../api';
 import { newsTime, sourceName, type NewsMeta } from '../news';
 import NewsPushSettings from './NewsPushSettings.vue';
 import SourceHealth from './SourceHealth.vue';
+import TrendRadarSettings from './TrendRadarSettings.vue';
 const emit = defineEmits<{ expired: []; devices: [] }>();
 const route = useRoute();
 const channels = computed(() => route.name === 'news-channels');
+const trendSettings = computed(() => route.name === 'trendradar-settings');
 const records = computed(() => route.name === 'news-notifications');
 const heading = ref<HTMLElement>();
 const meta = ref<NewsMeta>();
@@ -51,10 +53,19 @@ watch(
 <template>
   <section>
     <h1 id="news-settings-heading" ref="heading" tabindex="-1">
-      {{ channels ? '采集通道状态' : records ? '报道通知记录' : '报道关注与推送' }}
+      {{
+        trendSettings
+          ? 'TrendRadar 设置'
+          : channels
+            ? '采集通道状态'
+            : records
+              ? '报道通知记录'
+              : '报道关注与推送'
+      }}
     </h1>
+    <TrendRadarSettings v-if="trendSettings" @expired="emit('expired')" />
     <NewsPushSettings
-      v-if="!channels"
+      v-else-if="!channels"
       :records-only="records"
       @expired="emit('expired')"
       @devices="emit('devices')"

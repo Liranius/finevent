@@ -35,7 +35,7 @@ try {
     $null = Initialize-FineventDeployment
     $rendered = ConvertTo-FineventDeploymentText 'https://www.example.com /srv/example/finevent-data/db /srv/example/finevent/current'
     Assert-Deployment ($rendered -eq 'https://portal.invalid /private-test/dataRoot/db /private-test/appRoot/current') 'Overlapping deployment paths rendered incorrectly'
-    foreach ($file in @('finevent.service','finevent.nginx.conf','install.py','calendar_release.py','backup.py')) {
+    foreach ($file in @('finevent.service','finevent-trend-settings@.service','trend_settings.py','finevent.nginx.conf','install.py','calendar_release.py','backup.py')) {
         $destination = Join-Path $temporary $file
         Export-FineventDeploymentFile (Join-Path $repoRoot "deploy/$file") $destination
         $content = Get-Content -LiteralPath $destination -Raw

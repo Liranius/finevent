@@ -68,6 +68,12 @@ export function createAppRouter(
         meta: { workspace: 'preferences', settings: true },
       },
       {
+        path: '/settings/trendradar',
+        name: 'trendradar-settings',
+        component: NewsPreferences,
+        meta: { workspace: 'preferences', settings: true },
+      },
+      {
         path: '/settings/news-channels',
         name: 'news-channels',
         component: NewsPreferences,

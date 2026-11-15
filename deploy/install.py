@@ -370,6 +370,17 @@ def verify_bundle(bundle):
         raise RuntimeError('Render the generic archive with deployment settings before installation')
 
 
+def check_settings_socket():
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(8)
+        conn.connect('/run/finevent-trend-settings.sock')
+        conn.sendall(b'{"op":"read"}\n')
+        with conn.makefile('rb') as stream:
+            reply = json.loads(stream.readline(2 * 1024 * 1024))
+    if reply.get('status') != 200 or not isinstance(reply.get('data', {}).get('sources'), list):
+        raise RuntimeError('TrendRadar settings worker could not read the mounted configuration')
+
+
 def install(*, evidence_callback=None):
     import pwd
     if os.geteuid() != 0:
@@ -377,6 +388,8 @@ def install(*, evidence_callback=None):
     os.umask(0o077)
     bundle = Path(__file__).resolve().parent.parent
     verify_bundle(bundle)
+    # The socket worker uses the system interpreter, including on hosts with a separate venv.
+    run("/usr/bin/python3", "-I", "-c", "import yaml")
     site, patched_site = find_site()
     if available_memory() < 128 * 1024 * 1024:
         raise RuntimeError("Less than 128 MiB available before startup; no service changes made")
@@ -427,13 +440,15 @@ def install(*, evidence_callback=None):
                     if output.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                         raise RuntimeError("Pre-deploy backup failed integrity check")
         switch_release(release)
-        for unit in ("finevent.service", "finevent-backup.service", "finevent-backup.timer"):
+        for unit in ("finevent.service", "finevent-backup.service", "finevent-backup.timer",
+                     "finevent-trend-settings.socket", "finevent-trend-settings@.service"):
             replace_file(Path("/etc/systemd/system") / unit, (release / "deploy" / unit).read_bytes(), directory, state)
         replace_file(SNIPPET, (release / "deploy/finevent.nginx.conf").read_bytes(), directory, state)
         replace_file(site, patched_site.encode(), directory, state)
         run("nginx", "-t", capture=True)
         run("systemctl", "daemon-reload")
         run("systemctl", "start", "finevent.service")
+        check_settings_socket()
         readings = []
         for _ in range(6):
             time.sleep(10)

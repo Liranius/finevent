@@ -1,0 +1,11 @@
+[Unit]
+Description=Finevent TrendRadar settings socket
+PartOf=finevent.service
+
+[Socket]
+ListenStream=/run/finevent-trend-settings.sock
+SocketMode=0660
+SocketGroup=finevent
+Accept=yes
+RemoveOnStop=yes
+MaxConnections=8

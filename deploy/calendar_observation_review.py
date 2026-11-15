@@ -66,7 +66,7 @@ def read_cycles(root, start, end):
     return sorted(cycles, key=lambda row: (row['at'], row['record_id'])), missing
 
 
-def summarize(cycles, start, finished):
+def summarize(cycles, start, finished, expected_by_cycle=None):
     history = {}
     for cycle in cycles:
         for source in cycle['sources']:
@@ -84,9 +84,14 @@ def summarize(cycles, start, finished):
             failures.append({'source': source['platform_id'], 'at': cycle['at'], 'time': cycle['time'],
                              'status': source['status'], 'first_later_success': recovered,
                              'latest': latest, 'latest_success': latest['status'] == 'success'})
+    def complete(cycle):
+        ids = [s['platform_id'] for s in cycle['sources']]
+        if expected_by_cycle is None:  # Historical reports predate the configuration snapshots.
+            return len(ids) == len(set(ids)) == 9
+        expected = expected_by_cycle.get(str(cycle['at']))
+        return isinstance(expected, list) and sorted(ids) == sorted(expected)
     return {'observation_cycles': len(observed), 'observation_source_failures': failures,
-            'observation_cycles_with_incomplete_sources': [cycle['time'] for cycle in observed
-                if len(cycle['sources']) != 9 or len({s['platform_id'] for s in cycle['sources']}) != 9],
+            'observation_cycles_with_incomplete_sources': [cycle['time'] for cycle in observed if not complete(cycle)],
             'source_latest': {source: rows[-1] for source, rows in history.items()},
             'followup_cycles': len(cycles)-len(observed),
             'followup_source_failures': [{'source': source['platform_id'], 'time': cycle['time'], 'status': source['status']}
@@ -103,8 +108,17 @@ def inspect(release_id, now=None):
     now = int(time.time()) if now is None else now
     require(start <= finished <= now, 'Invalid observation time range')
     cycles, missing = read_cycles(TREND, start, now)
-    summary = summarize(cycles, start, finished)
     expected = report['trendradar']
+    if 'expected_by_cycle' in expected:
+        # This diagnostic is also uploaded as a standalone script; use the installed helper.
+        import sys
+        sys.path.insert(0, '/srv/example/finevent/current/deploy')
+        import trend_settings
+        periods = trend_settings.observation_periods()
+        for cycle in cycles:
+            cycle['expected_sources'] = (expected['expected_by_cycle'].get(str(cycle['at'])) if cycle['at'] <= finished
+                                         else trend_settings.expected_at(periods, cycle['at']))
+    summary = summarize(cycles, start, finished, expected.get('expected_by_cycle'))
     matches = (summary['observation_cycles'] == expected['cycles']
                and len(summary['observation_source_failures']) == expected['source_failures'])
     return {'release_id': release_id, 'original_report_sha256': hashlib.sha256(raw).hexdigest(),

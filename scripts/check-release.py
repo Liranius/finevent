@@ -72,6 +72,10 @@ def check_archive(filename, kind='deployment'):
         raise RuntimeError('Missing news push verification checks')
     if b'import source_health_release' in files.get('deploy/news_release.py', b'') and 'deploy/source_health_release.py' not in manifest:
         raise RuntimeError('Missing source health verification checks')
+    if b'finevent-trend-settings.socket' in files.get('deploy/finevent.service', b''):
+        for name in ('trend_settings.py', 'finevent-trend-settings.socket', 'finevent-trend-settings@.service'):
+            if f'deploy/{name}' not in manifest:
+                raise RuntimeError(f'Missing TrendRadar settings dependency: {name}')
     if b'import calendar_links_release' in files.get('deploy/news_release.py', b'') and 'deploy/calendar_links_release.py' not in manifest:
         raise RuntimeError('Missing calendar link verification checks')
     if any('ai-config' in name for name in files):

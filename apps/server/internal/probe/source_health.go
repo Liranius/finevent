@@ -222,6 +222,8 @@ type TrendSource struct {
 	Stale       bool   `json:"stale"`
 }
 type TrendHealth struct {
+	ConfigKnown       bool          `json:"config_known,omitempty"`
+	ConfigError       string        `json:"config_error,omitempty"`
 	ServerTime        int64         `json:"server_time"`
 	CollectionEnabled bool          `json:"collection_enabled"`
 	TrendEnabled      bool          `json:"trendradar_enabled"`

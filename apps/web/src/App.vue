@@ -342,7 +342,6 @@ onUnmounted(() => {
             @queue-test="queueTest"
             @record="record"
             @disable-device="disableDevice"
-            @expired="authenticated = false"
           />
           <component :is="Component" v-else />
         </RouterView>

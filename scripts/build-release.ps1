@@ -34,7 +34,7 @@ Copy-Item -LiteralPath 'apps/web/dist' -Destination $releaseRoot -Recurse -Force
 $releaseDeploy = Join-Path $releaseRoot 'deploy'
 New-Item -ItemType Directory -Path $releaseDeploy | Out-Null
 Copy-Item -LiteralPath 'apps/server/internal/calendar/snapshots/nbs-2026.json' -Destination (Join-Path $releaseDeploy 'calendar-snapshot.json')
-foreach ($deployFile in @('install.py','backup.py','calendar_release.py','persistence_baseline.py','news_release.py','news_push_release.py','source_health_release.py','calendar_links_release.py','ai_release.py','calendar_review.py','calendar-reviews.json','verification.py','verification_resources.py','memory_recovery.py','memory_diagnostic.py','finevent.service','finevent-backup.service','finevent-backup.timer','finevent.nginx.conf')) {
+foreach ($deployFile in @('install.py','trend_settings.py','finevent-trend-settings.socket','finevent-trend-settings@.service','backup.py','calendar_release.py','persistence_baseline.py','news_release.py','news_push_release.py','source_health_release.py','calendar_links_release.py','ai_release.py','calendar_review.py','calendar-reviews.json','verification.py','verification_resources.py','memory_recovery.py','memory_diagnostic.py','finevent.service','finevent-backup.service','finevent-backup.timer','finevent.nginx.conf')) {
     Copy-Item -LiteralPath (Join-Path 'deploy' $deployFile) -Destination (Join-Path $releaseDeploy $deployFile)
 }
 Copy-Item -LiteralPath '.deployment.example.json' -Destination (Join-Path $releaseRoot 'deployment-template.json')

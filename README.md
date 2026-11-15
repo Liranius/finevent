@@ -12,6 +12,8 @@
 
 ## 初始化
 
+当前源码提供「设置 → 来源状态 → TrendRadar 设置」，可单独保存或恢复采集来源和日报关键词。部署依赖、接口和按轮次核对来源的规则见 [TrendRadar 设置](docs/source-health-api.md#trendradar-设置)。
+
 自有代码采用 [MIT 许可证](LICENSE)；收录的第三方技能和 schema 遵循各自许可证，来源与范围见 [第三方材料说明](THIRD_PARTY_NOTICES.md)。
 
 前端位于 `apps/web/`，由 pnpm workspace 管理；后端位于 `apps/server/`，保留独立 Go module。`e2e/` 验证前后端集成，`deploy/` 保存部署工具及测试，`scripts/` 提供仓库级构建与发布入口。公共检查配置和锁文件位于根目录。
@@ -72,6 +74,8 @@ python -m unittest discover -s deploy -p 'test_*.py'
 pnpm test:e2e
 git diff --check
 ```
+
+部署用例使用 Python 3.11 或更高版本和 PyYAML。CI 在临时虚拟环境中安装依赖。
 
 `pnpm test:e2e` 包含类型检查、前端构建和真实 Go 服务的 Chromium 检查，覆盖桌面、窄屏、键盘登录、退出、离线资源、通知记录、日历切换、公告确认及改期取消。模拟的通知记录不属于 Web Push 送达验收；真机步骤见 [验收记录](docs/implementation-status.md)。截图位于 `test-results/`，失败保留 trace。
 

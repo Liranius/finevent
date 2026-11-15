@@ -41,12 +41,12 @@ def probe(ready=True):
         calendar.require(code == 200 and result.get('collection_enabled') and result.get('trendradar_enabled')
                          and isinstance(result.get('sources'), list) and isinstance(result.get('warnings'), list),
                          'Source health API invalid')
-        states = {'healthy', 'failed', 'missing', 'unknown', 'stale'}
+        states = {'healthy', 'failed', 'missing', 'unknown', 'stale', 'disabled', 'pending', 'unexpected'}
         calendar.require(all(row.get('id') and row.get('state') in states for row in result['sources'])
                          and len({row['id'] for row in result['sources']}) == len(result['sources']),
                          'Source health identity/status invalid')
         if ready:
-            calendar.require(result['sources'] and not result.get('read_error') and not result.get('read_stale')
+            calendar.require(result['sources'] and not result.get('config_error') and not result.get('read_error') and not result.get('read_stale')
                              and 0 <= result['server_time']-result.get('read_success', 0) <= 180
                              and 0 < result.get('latest_cycle', 0) <= result['server_time'],
                              'Source health collection is not ready')
@@ -57,7 +57,8 @@ def probe(ready=True):
                 'states': {state: sum(row['state'] == state for row in result['sources']) for state in states},
                 'read_success': result.get('read_success', 0), 'latest_cycle': result.get('latest_cycle', 0),
                 'history_page_items': len(history['items']), 'anonymous_status': 401,
-                'all_upstream_sources_healthy': all(row['state'] == 'healthy' for row in result['sources']) if result['sources'] else False}
+                'all_upstream_sources_healthy': any(row['state'] == 'healthy' for row in result['sources'])
+                    and all(row['state'] in ('healthy', 'disabled') for row in result['sources'])}
 
 
 def checks_passed(report):

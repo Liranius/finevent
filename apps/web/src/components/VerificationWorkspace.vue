@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 
 import { deliveryState, formatTime, type Status } from '../api';
-import SourceHealth from './SourceHealth.vue';
 
 const props = defineProps<{
   status: Status | null;
@@ -17,7 +16,6 @@ const emit = defineEmits<{
   queueTest: [];
   record: [id: number, result: string];
   disableDevice: [id: number];
-  expired: [];
 }>();
 const deviceLabel = defineModel<string>('deviceLabel', { required: true });
 const deviceID = defineModel<number | null>('deviceId', { required: true });
@@ -208,12 +206,12 @@ function mb(bytes: number | undefined) {
     </details>
   </section>
   <section v-else-if="view === 'sources'" aria-labelledby="sources-title">
-    <SourceHealth @expired="emit('expired')" />
     <div class="section-title">
       <h2 id="sources-title">消息多久抵达？</h2>
       <span>目标 3–5 分钟 · 免费源</span>
     </div>
     <p class="intro">首次拉取的历史消息不计入时效。没有发布时间的来源不生成延迟数字。</p>
+    <RouterLink :to="{ name: 'news-channels' }">查看采集通道状态</RouterLink>
     <p v-if="status && !status.collection_enabled" class="message">
       当前服务未开启来源采样，部署时开启采集后开始记录。
     </p>

@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 import install as installer
 import memory_recovery as recovery
 import calendar_review
+import trend_settings
 
 MIB = 1024**2
 ROOT = Path('/srv/example/finevent')
@@ -550,6 +551,7 @@ def restart_check(directory, report, current):
 
 def trend_outputs(start, end, minimum_cycles=2):
     records, sources = [], []
+    periods = trend_settings.observation_periods(TREND.parent/'config')
     day = datetime.fromtimestamp(start, ZONE).date()
     last = datetime.fromtimestamp(end, ZONE).date()
     while day <= last:
@@ -557,20 +559,23 @@ def trend_outputs(start, end, minimum_cycles=2):
             for row in conn.execute('SELECT id,crawl_time,total_items FROM crawl_records ORDER BY id'):
                 at = int(datetime.strptime(f'{day} {row["crawl_time"]}', '%Y-%m-%d %H-%M').replace(tzinfo=ZONE).timestamp())
                 if start <= at <= end:
-                    records.append({'at': at, 'items': row['total_items']})
-                    sources.extend({'at': at, 'source': r['platform_id'], 'status': r['status']} for r in conn.execute(
-                        'SELECT platform_id,status FROM crawl_source_status WHERE crawl_record_id=?', (row['id'],)))
+                    expected = trend_settings.expected_at(periods, at)
+                    actual = [{'at': at, 'source': r['platform_id'], 'status': r['status']} for r in conn.execute(
+                        'SELECT platform_id,status FROM crawl_source_status WHERE crawl_record_id=?', (row['id'],))]
+                    complete = expected is not None and sorted(expected) == sorted(s['source'] for s in actual)
+                    records.append({'at': at, 'items': row['total_items'], 'expected': expected, 'complete': complete})
+                    sources.extend(actual)
         day += timedelta(days=1)
     with closing(readonly(DATA/'finevent.db')) as conn:
         polls = conn.execute("SELECT COUNT(*),SUM(CASE WHEN success=0 THEN 1 ELSE 0 END),MAX(CASE WHEN success=1 THEN completed END) FROM polls WHERE source='trendradar' AND started>=?", (start,)).fetchone()
     html = TREND/'index.html'
-    good = (len({r['at']//1800 for r in records if r['items'] > 0}) >= minimum_cycles
-            and all(sum(s['at'] == r['at'] for s in sources) == 9 for r in records)
+    cycles = {r['at']//1800 for r in records if r['items'] > 0 or r['expected'] == []}
+    good = (len(cycles) >= minimum_cycles and all(r['complete'] for r in records)
             and all(s['status'] == 'success' for s in sources) and polls[0] > 0 and polls[1] == 0
             and polls[2] is not None and end-polls[2] <= 180
             and html.is_file() and html.stat().st_size > 0 and html.stat().st_mtime >= max((r['at'] for r in records), default=end))
     return {'status': 'passed' if good else 'needs_review', 'cycles': len(records),
-            'distinct_cycles': len({r['at']//1800 for r in records if r['items'] > 0}),
+            'distinct_cycles': len(cycles), 'expected_by_cycle': {str(r['at']): r['expected'] for r in records},
             'source_failures': sum(s['status'] != 'success' for s in sources), 'polls': polls[0],
             'poll_failures': polls[1], 'last_import': polls[2], 'html_mtime': html.stat().st_mtime if html.exists() else None}
 

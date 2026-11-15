@@ -1,6 +1,14 @@
 export interface TrendSourceHealth {
   id: string;
-  state: 'healthy' | 'failed' | 'missing' | 'unknown' | 'stale';
+  state:
+    | 'healthy'
+    | 'failed'
+    | 'missing'
+    | 'unknown'
+    | 'stale'
+    | 'disabled'
+    | 'pending'
+    | 'unexpected';
   last_attempt: number;
   last_status: string;
   last_success: number;
@@ -9,6 +17,8 @@ export interface TrendSourceHealth {
   stale: boolean;
 }
 export interface TrendHealth {
+  config_error?: string;
+  config_known?: boolean;
   server_time: number;
   collection_enabled: boolean;
   trendradar_enabled: boolean;
@@ -33,6 +43,9 @@ export interface TrendFailurePage {
   next: string;
 }
 export const sourceStateName: Record<TrendSourceHealth['state'], string> = {
+  disabled: '已停用',
+  unexpected: '停用后仍有采集记录',
+  pending: '等待下一轮采集',
   healthy: '最近采集成功',
   failed: '最近采集失败',
   missing: '最新一轮缺记录',
