@@ -2,6 +2,7 @@ from contextlib import closing, ExitStack
 from copy import deepcopy
 import json
 from pathlib import Path
+from types import SimpleNamespace
 import sqlite3
 import tempfile
 import unittest
@@ -73,8 +74,86 @@ class ReleaseBaselineTests(unittest.TestCase):
     def sampling(self):
         self.mock(calendar.recovery, 'validate_live_processes')
         self.mock(calendar, 'sample', side_effect=lambda *_: dict(fixtures.row(), at=int(self.now)))
-        self.mock(calendar, 'trend_outputs', return_value={'status': 'passed', 'distinct_cycles': 2})
+        self.mock(calendar, 'trend_outputs', side_effect=lambda start, end, **kwargs: {
+            'status': 'passed', 'distinct_cycles': 2, 'html_mtime': end-10, 'last_import': end-5,
+        })
+        # The observer clock advances in-process; run read-only probe jobs on this same test clock.
+        self.mock(baselines, 'Thread', side_effect=lambda target, args, daemon: SimpleNamespace(start=lambda: target(*args)))
         self.mock(calendar.recovery, 'public_health', return_value=fixtures.evidence()['health'])
+
+    def test_comparison_separates_baseline_and_business_and_keeps_late_failure(self):
+        self.sampling()
+        baseline = fixtures.row()
+        report = {'resources': calendar.resource_summary([baseline], baseline)}
+        comparison = baselines.WindowComparison(self.next, report, self.now)
+        comparison.sample(dict(baseline, at=int(self.now)), baseline)
+        self.advance(3600)
+        comparison.checkpoint(lambda: False)
+        self.advance(5)
+        comparison.sample(dict(baseline, at=int(self.now)), baseline)
+        self.assertEqual(comparison.data['baseline_ready_at'], self.now)
+        self.assertIsNone(comparison.data['candidate_at'])
+
+        self.advance(60)
+        comparison.checkpoint(lambda: True)
+        self.advance(5)
+        comparison.sample(dict(baseline, at=int(self.now)), baseline)
+        candidate = self.now
+        self.advance(5)
+        comparison.sample(dict(baseline, at=int(self.now), finevent_current=70*calendar.MIB), baseline)
+        self.advance(5)
+        with self.assertRaisesRegex(RuntimeError, 'OOM'):
+            comparison.sample(dict(baseline, at=int(self.now), host_oom_kill=baseline['host_oom_kill']+1), baseline)
+        saved = json.loads((self.next/'report.json').read_bytes())['window_comparison']
+        self.assertEqual(saved['candidate_at'], candidate)
+        self.assertEqual(saved['tail']['samples'], 2)
+        self.assertEqual(saved['tail']['finevent_peak_mib'], 70)
+        self.assertEqual(saved['tail']['first_resource_issue']['at'], int(self.now))
+        self.assertIn('OOM', saved['tail']['first_resource_issue']['reason'])
+
+    def test_candidate_requires_a_fresh_probe_import_and_continuous_resources(self):
+        self.sampling()
+        baseline = fixtures.row()
+        for case in ('pending', 'stale', 'import_before_html', 'resource_gap', 'https'):
+            with self.subTest(case=case):
+                report = {'resources': calendar.resource_summary([baseline], baseline)}
+                comparison = baselines.WindowComparison(self.next, report, self.now)
+                comparison.sample(dict(baseline, at=int(self.now)), baseline)
+                self.advance(3600)
+                html = int(self.now)-5
+                imported = html-1 if case == 'import_before_html' else html+1
+                with patch.object(calendar, 'trend_outputs', return_value={
+                         'status': 'passed', 'distinct_cycles': 2, 'html_mtime': html, 'last_import': imported}), \
+                     patch.object(calendar.recovery, 'public_health', return_value={} if case == 'https' else fixtures.evidence()['health']):
+                    if case == 'pending':
+                        with patch.object(baselines, 'Thread'):
+                            comparison.checkpoint(lambda: True)
+                    else:
+                        comparison.checkpoint(lambda: True)
+                self.advance(65 if case == 'stale' else 5)
+                if case == 'resource_gap':
+                    report['resources']['max_sample_interval_seconds'] = 16
+                comparison.sample(dict(baseline, at=int(self.now)), baseline)
+                self.assertIsNone(comparison.data['candidate_at'])
+                self.assertIsNone(comparison.data['tail'])
+
+    def test_comparison_probe_failure_does_not_invalidate_a_full_baseline(self):
+        self.sampling()
+        def trend(start, end, *, post_start_cycles=False):
+            if post_start_cycles:
+                raise OSError('private diagnostic details')
+            return {'status': 'passed', 'distinct_cycles': 2}
+        self.mock(calendar, 'trend_outputs', side_effect=trend)
+        report = {'id': FAILED}
+        baselines.collect(self.next, report)
+        self.assertEqual(report['status'], 'completed_for_review')
+        comparison = report['window_comparison']
+        self.assertIsNone(comparison['candidate_at'])
+        self.assertIsNone(comparison['tail'])
+        self.assertGreater(comparison['probe_errors'], 0)
+        self.assertEqual(comparison['last_probe_error'], 'OSError')
+        self.assertNotIn('private diagnostic details', json.dumps(report))
+        baselines.validate(report, FAILED, self.now, self.basis)
 
     def test_both_post_restart_acceptance_loops_publish_their_own_samples(self):
         self.sampling()
@@ -86,7 +165,7 @@ class ReleaseBaselineTests(unittest.TestCase):
         self.mock(news, 'probe_api', return_value={'rule_version': 'test'})
         self.mock(news, 'state', return_value={})
         self.mock(news, 'polls', return_value={})
-        self.mock(news, 'checks_passed', return_value=True)
+        self.mock(news, 'checks_passed', side_effect=lambda report: report['news_api_samples'] >= 60)
         observe_again = self.mock(baselines, 'collect')
         for observer in (calendar, news):
             with self.subTest(profile=observer.__name__):
@@ -94,7 +173,15 @@ class ReleaseBaselineTests(unittest.TestCase):
                 directory.mkdir()
                 report = {'id': PREVIOUS, 'initial_calendar': fixtures.state(), 'preflight': self.current,
                           'deployment': {'release': self.current['previous_release']}}
+                started = self.now
                 observer.observe(directory, report, self.container)
+                comparison = report['window_comparison']
+                self.assertLess(comparison['candidate_at']-started, 65*60)
+                self.assertGreaterEqual(self.now-started, 65*60)
+                self.assertGreater(comparison['tail']['samples'], 0)
+                self.assertIsNone(comparison['tail']['first_resource_issue'])
+                if observer is news:
+                    self.assertGreaterEqual(comparison['candidate_at']-started, 59*60)
                 self.assertIn('next_baseline', report)
                 window = json.loads((directory/'next-baseline.json').read_bytes())
                 rows = [json.loads(line) for line in (directory/'samples.jsonl').read_text().splitlines()]
@@ -171,6 +258,7 @@ class ReleaseBaselineTests(unittest.TestCase):
         path = self.next/'preflight_baseline'/'report.json'
         self.assertEqual(calendar.recovery.sha(path), result['renewed_baseline']['report_sha256'])
         self.assertEqual(json.loads(path.read_bytes())['resources']['samples'], 781)
+        self.assertEqual(self.operation['preflight_baseline']['window_comparison'], json.loads(path.read_bytes())['window_comparison'])
         self.assertIn('preflight_baseline', json.loads((self.next/'report.json').read_bytes()))
 
     def test_invalid_or_interrupted_window_requests_one_fresh_observation(self):

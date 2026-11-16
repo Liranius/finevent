@@ -101,6 +101,11 @@ class SettingsTests(unittest.TestCase):
             report = calendar_release.trend_outputs(1800,3600)
             self.assertEqual(report['status'], 'passed')
             self.assertEqual(report['expected_by_cycle'], {'1800':['first'], '3600':['second']})
+            # A run launched before restart may finish (and be timestamped) just after it.
+            with closing(sqlite3.connect(news/'1970-01-01.db')) as conn, conn:
+                conn.execute("UPDATE crawl_records SET crawl_time='08-31' WHERE id=1")
+            self.assertEqual(calendar_release.trend_outputs(1801,3600)['distinct_cycles'], 2)
+            self.assertEqual(calendar_release.trend_outputs(1801,3600,post_start_cycles=True)['distinct_cycles'], 1)
             periods[1]['ids'] = ['first']  # Equal count, wrong identity.
             self.assertEqual(calendar_release.trend_outputs(1800,3600)['status'], 'needs_review')
 
