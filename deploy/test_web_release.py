@@ -124,6 +124,11 @@ class NginxRouteTests(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(self.path.encode())
 
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(204)
+                self.end_headers()
+
             def log_message(self, *args):
                 pass
 
@@ -146,10 +151,10 @@ class NginxRouteTests(unittest.TestCase):
                 nginx.terminate()
                 nginx.communicate(timeout=5)
             self.addCleanup(stop)
-            def get(path, host='www.example.com'):
+            def get(path, host='www.example.com', data=None):
                 conn = http.client.HTTPConnection('127.0.0.1', port, timeout=2)
                 try:
-                    conn.request('GET', '/finevent/'+path, headers={'Host': host})
+                    conn.request('GET' if data is None else 'POST', '/finevent/'+path, data, headers={'Host': host})
                     response = conn.getresponse()
                     return response.status, dict(response.getheaders()), response.read()
                 finally:
@@ -175,6 +180,9 @@ class NginxRouteTests(unittest.TestCase):
             for path in ('index.html?q=1', 'sw.js', 'api/v1/session', 'assets/one.js'):
                 status, headers, _ = get(path, 'example.com')
                 self.assertEqual((status, headers.get('Location')), (308, 'https://www.example.com/finevent/'+path))
+            upload = b'x' * (32*1024)
+            self.assertEqual(get('api/v1/calendar-imports/bls', data=upload)[0], 204)
+            self.assertEqual(get('api/v1/login', data=upload)[0], 413)
             self.assertEqual(get('missing.js')[0], 404)
             self.assertEqual(get('api/missing')[0], 404)
             web_release.stage(web, 'two', {'dist/index.html': b'two', 'dist/assets/two.js': b'two'})

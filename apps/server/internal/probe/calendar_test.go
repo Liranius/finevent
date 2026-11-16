@@ -13,6 +13,88 @@ import (
 	"finevent/internal/calendar"
 )
 
+func TestFollowedBenchmarkKeepsReminderScheduleAcrossSources(t *testing.T) {
+	now := time.Date(2027, 8, 24, 0, 0, 0, 0, time.UTC)
+	a, _, _ := reminderFixture(t, now)
+	s := &calendar.Store{DB: a.Store.DB}
+	e := calendar.Event{Source: "manual", SourceID: "benchmark", Title: "美国非农就业年度基准初步修订（全国）",
+		Kind: "macro", Importance: 3, Start: "2027-08-26T10:00:00-04:00", End: "2027-08-26T10:00:00-04:00",
+		Timezone: "America/New_York", Precision: "minute", Status: "confirmed", URL: "https://www.bls.gov/schedule/2027/08_sched_list.htm"}
+	old, err := s.Save(e, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Store.DB.Exec(`INSERT INTO calendar_reminder_watches VALUES(?,1)`, old.ID); err != nil {
+		t.Fatal(err)
+	}
+	assertJobs := func(queued, cancelled int) {
+		t.Helper()
+		reconcileTest(t, a, now)
+		var pending, retired int
+		err := a.Store.DB.QueryRow(`SELECT count(*) FILTER(WHERE d.status='queued'),count(*) FILTER(WHERE d.status='cancelled')
+			FROM calendar_reminder_jobs j JOIN deliveries d ON d.id=j.delivery_id WHERE j.event_id=?`, old.ID).Scan(&pending, &retired)
+		if err != nil || pending != queued || retired != cancelled {
+			t.Fatal(pending, retired, err)
+		}
+	}
+	assertJobs(2, 0)
+	if err := s.ImportBundledSnapshot(); err != nil {
+		t.Fatal(err)
+	}
+	assertJobs(2, 0)
+	file := "BEGIN:VCALENDAR\nBEGIN:VEVENT\nUID:test-national-uid\nSUMMARY:Current Employment Statistics Preliminary Benchmark (National) for March 2027\nDTSTART;TZID=America/New_York:20270827T100000\nEND:VEVENT\nEND:VCALENDAR"
+	upload := func(body string) {
+		t.Helper()
+		const path = "calendar-imports/bls"
+		w := perform(a, authed(t, a, "POST", path, body))
+		var review calendar.ICSImport
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &review) != nil || len(review.Changes) != 1 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		w = perform(a, authed(t, a, "POST", path+"?confirm="+review.Token, body))
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	upload(file)
+	assertJobs(2, 2)
+	live, err := calendar.Parse("bls", "https://www.bls.gov/schedule/news_release/bls.ics", file, 2027)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = s.Import("bls", live, now.Unix(), nil); err != nil {
+		t.Fatal(err)
+	}
+	assertJobs(2, 2)
+	upload(strings.Replace(file, "END:VEVENT", "STATUS:CANCELLED\nEND:VEVENT", 1))
+	assertJobs(0, 4)
+	live[0].Status = "cancelled"
+	if err = s.Import("bls", live, now.Unix(), nil); err != nil {
+		t.Fatal(err)
+	}
+	assertJobs(0, 4)
+}
+
+func TestBLSUploadRequiresSessionOriginAndBoundedFile(t *testing.T) {
+	a := testApp(t)
+	path := "calendar-imports/bls"
+	r := httptest.NewRequest("POST", prefix+path, strings.NewReader("calendar"))
+	if w := perform(a, r); w.Code != 401 {
+		t.Fatal(w.Code)
+	}
+	r = authed(t, a, "POST", path, "calendar")
+	r.Header.Set("Origin", "https://example.org")
+	if w := perform(a, r); w.Code != 403 {
+		t.Fatal(w.Code)
+	}
+	if w := perform(a, authed(t, a, "POST", path, "<html>Forbidden</html>")); w.Code != 400 {
+		t.Fatal(w.Code)
+	}
+	if w := perform(a, authed(t, a, "POST", path, strings.Repeat("x", calendar.MaxICSBytes+1))); w.Code != 413 {
+		t.Fatal(w.Code)
+	}
+}
+
 func TestOfficialSnapshotDownloadRequiresSessionAndDoesNotRenderHTML(t *testing.T) {
 	a := testApp(t)
 	s := &calendar.Store{DB: a.Store.DB}
@@ -49,8 +131,15 @@ func TestOfficialSnapshotDownloadRequiresSessionAndDoesNotRenderHTML(t *testing.
 	if err = json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Events) != 4 || result.Events[0].Provenance.Mode != "snapshot" {
-		t.Fatal(result.Events)
+	counts := map[string]int{}
+	for _, e := range result.Events {
+		if e.Provenance == nil || e.Provenance.Mode != "snapshot" {
+			t.Fatal(e)
+		}
+		counts[e.Source]++
+	}
+	if counts["nbs"] != 4 || counts["bls"] != 10 {
+		t.Fatal(counts)
 	}
 	for _, source := range result.Sources {
 		if source.ID == "nbs" && (source.LastSuccess != 0 || source.Snapshots[0].ActiveEntries != 47) {

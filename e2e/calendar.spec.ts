@@ -75,7 +75,15 @@ test('日历：补录时刻、月份切换、日期选择、窄屏议程', async
   await page.getByRole('button', { name: '议程', exact: true }).click();
   await page.getByRole('link', { name: '设置', exact: true }).click();
   await page.getByRole('link', { name: '日历官方来源', exact: true }).click();
-  await page.getByText('官方来源 · 5 项待核查', { exact: true }).click();
+  await page.getByText('官方来源 · 7 项待核查', { exact: true }).click();
+  await expect(page.getByRole('link', { name: '美国人口普查局' })).toHaveAttribute(
+    'href',
+    'https://www.census.gov/retail/release_schedule.html',
+  );
+  await expect(page.getByRole('link', { name: '美国劳工部' })).toHaveAttribute(
+    'href',
+    'https://oui.doleta.gov/unemploy/claims_arch.asp',
+  );
   await expect(page.getByText('当前服务未启用自动同步。')).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('calendar-desktop.png'), fullPage: true });
   await page.getByRole('link', { name: '财经日历', exact: true }).click();
@@ -131,7 +139,7 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
   // The official fixture is November 2026; month navigation must not depend on today's date.
   await page.clock.setFixedTime(new Date('2026-10-31T04:00:00Z'));
   await login(page);
-  await expect(page.getByRole('status')).toContainText('47 项日程来自已核对的官方快照');
+  await expect(page.getByRole('status')).toContainText('355 项日程来自已核对的官方快照');
   const response = await page.request.get('api/v1/calendar?from=2026-11-01&to=2026-11-30');
   const data = await response.json();
   const source = data.sources.find((item: { id: string }) => item.id === 'nbs');
@@ -182,6 +190,44 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
     page.getByRole('button', { name: new RegExp(snapshotEvent.title) }).first(),
   ).toBeFocused();
 });
+
+for (const width of [1280, 393]) {
+  test(`BLS 年度修订：${width}px 核对原表、独立事件、北京时间和关注`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 852 });
+    await page.clock.setFixedTime(new Date('2027-08-01T04:00:00Z'));
+    await login(page);
+    await page.getByRole('link', { name: '设置', exact: true }).click();
+    await page.getByRole('link', { name: '日历官方来源', exact: true }).click();
+    await page.locator('summary').filter({ hasText: '官方来源' }).press('Enter');
+    const source = page
+      .locator('li')
+      .filter({ has: page.getByRole('link', { name: '美国 BLS', exact: true }) });
+    await expect(source.getByText('尚未成功同步')).toBeVisible();
+    const year = source.locator('.snapshot-record').filter({ hasText: /2027 年\s*BLS 年表/ });
+    await expect(year.getByRole('link', { name: '查看官方发布页' })).toHaveAttribute(
+      'href',
+      'https://www.bls.gov/schedule/2027/home.htm',
+    );
+    await page.getByRole('link', { name: '财经日历', exact: true }).click();
+    await page.getByRole('button', { name: '议程', exact: true }).click();
+    const national = page.getByRole('button', { name: /非农就业年度基准初步修订（全国）/ });
+    await expect(national).toHaveCount(1);
+    await expect(page.getByRole('button', { name: /年度基准初步修订（州及地区）/ })).toHaveCount(1);
+    await national.press('Enter');
+    await expect(
+      page.getByRole('heading', { name: /非农就业年度基准初步修订（全国）/ }),
+    ).toBeFocused();
+    await expect(page.locator('.event-datetime')).toHaveText('2027/08/26 22:00 · 北京时间');
+    await expect(page.getByText('官方日程摘录', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '下载核对时日程摘录' })).toBeVisible();
+    const watch = page.getByRole('button', { name: /^(取消)?关注此事件$/ });
+    const pressed = await watch.getAttribute('aria-pressed');
+    await watch.press('Enter');
+    await expect(watch).toHaveAttribute('aria-pressed', pressed === 'true' ? 'false' : 'true');
+    await page.getByRole('button', { name: '返回财经日历', exact: true }).click();
+    await expect(national).toBeFocused();
+  });
+}
 
 test('补充来源：单独标记、来源链接和 BLS 故障同时保留', async ({ page }, testInfo) => {
   await page.clock.setFixedTime(new Date('2026-10-31T04:00:00Z'));

@@ -16,24 +16,26 @@ import (
 var ErrConflict = errors.New("记录已变更，请重新加载")
 
 type Event struct {
-	ID         string      `json:"id"`
-	Source     string      `json:"source"`
-	SourceID   string      `json:"source_id"`
-	Title      string      `json:"title"`
-	Kind       string      `json:"kind"`
-	Start      string      `json:"start"`
-	End        string      `json:"end"`
-	Timezone   string      `json:"timezone"`
-	Precision  string      `json:"precision"`
-	Status     string      `json:"status"`
-	Importance int         `json:"importance"`
-	URL        string      `json:"url"`
-	Evidence   string      `json:"evidence"`
-	FundCode   string      `json:"fund_code"`
-	Conditions string      `json:"conditions"`
-	Version    int         `json:"version"`
-	UpdatedAt  int64       `json:"updated_at"`
-	Provenance *Provenance `json:"provenance,omitempty"`
+	ID          string      `json:"id"`
+	Source      string      `json:"source"`
+	SourceID    string      `json:"source_id"`
+	Title       string      `json:"title"`
+	Kind        string      `json:"kind"`
+	Start       string      `json:"start"`
+	End         string      `json:"end"`
+	Timezone    string      `json:"timezone"`
+	Precision   string      `json:"precision"`
+	Status      string      `json:"status"`
+	Importance  int         `json:"importance"`
+	URL         string      `json:"url"`
+	Evidence    string      `json:"evidence"`
+	FundCode    string      `json:"fund_code"`
+	Conditions  string      `json:"conditions"`
+	Version     int         `json:"version"`
+	UpdatedAt   int64       `json:"updated_at"`
+	Provenance  *Provenance `json:"provenance,omitempty"`
+	ICSSequence int         `json:"ics_sequence,omitempty"`
+	ICSModified string      `json:"ics_modified,omitempty"`
 }
 type Revision struct {
 	Event   Event `json:"event"`
@@ -69,6 +71,9 @@ CREATE TABLE IF NOT EXISTS calendar_revisions(event_id TEXT NOT NULL REFERENCES 
 CREATE TABLE IF NOT EXISTS calendar_sources(id TEXT PRIMARY KEY, last_attempt INTEGER NOT NULL DEFAULT 0, last_success INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0, coverage_end TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS fund_drafts(id TEXT PRIMARY KEY, payload TEXT NOT NULL, created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS calendar_snapshots(id TEXT PRIMARY KEY, source TEXT NOT NULL, metadata TEXT NOT NULL, body BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS calendar_bls_releases(name TEXT NOT NULL, period TEXT NOT NULL, event_id TEXT NOT NULL UNIQUE REFERENCES calendar_events(id), nyfed_id TEXT NOT NULL, release_day TEXT NOT NULL, PRIMARY KEY(name,period));
+CREATE INDEX IF NOT EXISTS calendar_bls_nyfed ON calendar_bls_releases(nyfed_id);
+CREATE TABLE IF NOT EXISTS calendar_bls_aliases(source TEXT NOT NULL, source_id TEXT NOT NULL, event_id TEXT NOT NULL REFERENCES calendar_events(id), PRIMARY KEY(source,source_id));
 CREATE TABLE IF NOT EXISTS calendar_source_repairs(id TEXT PRIMARY KEY, source TEXT NOT NULL, previous_state TEXT NOT NULL, requested_at INTEGER NOT NULL);`)
 	return err
 }
@@ -190,10 +195,16 @@ func (s *Store) History(id string) ([]Revision, error) {
 	return result, rows.Err()
 }
 func save(tx *sql.Tx, e Event, expected int, now int64) (Event, error) {
+	return saveAs(tx, e, Key(e.Source+":"+e.SourceID), expected, now)
+}
+
+// Keep the public event ID (and its watches, revisions and news links) when a
+// stronger source takes over the same release and reference period.
+func saveAs(tx *sql.Tx, e Event, id string, expected int, now int64) (Event, error) {
 	if err := e.Validate(); err != nil {
 		return e, err
 	}
-	e.ID = Key(e.Source + ":" + e.SourceID)
+	e.ID = id
 	old, err := get(tx, e.ID)
 	exists := err == nil
 	if err != nil && err != sql.ErrNoRows {
@@ -203,12 +214,7 @@ func save(tx *sql.Tx, e Event, expected int, now int64) (Event, error) {
 		return e, ErrConflict
 	}
 	if exists {
-		if e.Status != "cancelled" && (old.Start != e.Start || old.End != e.End || old.Precision != e.Precision || old.Timezone != e.Timezone) {
-			e.Status = "rescheduled"
-		}
-		if old.Status == "rescheduled" && e.Status == "scheduled" {
-			e.Status = old.Status
-		}
+		e.Status = revisionStatus(old, e)
 		e.Version = old.Version
 		e.UpdatedAt = old.UpdatedAt
 		a, _ := json.Marshal(e)
@@ -221,12 +227,39 @@ func save(tx *sql.Tx, e Event, expected int, now int64) (Event, error) {
 	e.UpdatedAt = now
 	b, _ := json.Marshal(e)
 	start, end := e.Days()
-	_, err = tx.Exec(`INSERT INTO calendar_events VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET start_day=excluded.start_day,end_day=excluded.end_day,payload=excluded.payload`, e.ID, e.Source, e.SourceID, start, end, string(b))
+	_, err = tx.Exec(`INSERT INTO calendar_events VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET source=excluded.source,source_id=excluded.source_id,start_day=excluded.start_day,end_day=excluded.end_day,payload=excluded.payload`, e.ID, e.Source, e.SourceID, start, end, string(b))
 	if err != nil {
 		return e, err
 	}
 	_, err = tx.Exec(`INSERT INTO calendar_revisions VALUES(?,?,?,?)`, e.ID, e.Version, string(b), now)
 	return e, err
+}
+
+func revisionStatus(old, next Event) string {
+	if next.Status != "cancelled" && scheduleMoved(old, next) {
+		return "rescheduled"
+	}
+	if old.Status == "rescheduled" && next.Status == "scheduled" {
+		return old.Status
+	}
+	return next.Status
+}
+
+func scheduleMoved(old, next Event) bool {
+	if old.Precision != next.Precision {
+		return true
+	}
+	if next.Precision == "date" {
+		return old.Start != next.Start || old.End != next.End || old.Timezone != next.Timezone
+	}
+	if old.Start == next.Start && old.End == next.End {
+		return false
+	}
+	oldStart, _ := time.Parse(time.RFC3339, old.Start)
+	oldEnd, _ := time.Parse(time.RFC3339, old.End)
+	start, _ := time.Parse(time.RFC3339, next.Start)
+	end, _ := time.Parse(time.RFC3339, next.End)
+	return !oldStart.Equal(start) || !oldEnd.Equal(end)
 }
 func (s *Store) Save(e Event, expected int) (Event, error) {
 	tx, err := s.DB.Begin()
@@ -269,7 +302,12 @@ func (s *Store) Import(source string, events []Event, now int64, fetchErr error)
 			if e.Source != source {
 				return errors.New("source mismatch")
 			}
-			if _, err = save(tx, e, -1, now); err != nil {
+			if source == "bls" || source == "nyfed" {
+				err = saveLiveBLSRelease(tx, e, now)
+			} else {
+				_, err = save(tx, e, -1, now)
+			}
+			if err != nil {
 				return err
 			}
 			_, d := e.Days()

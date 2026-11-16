@@ -6,7 +6,8 @@
 | -------------------------------------------- | ------------------------------------------------------------------------- |
 | `GET calendar?from=YYYY-MM-DD&to=YYYY-MM-DD` | 查询相交区间（含两端，最长一年），返回 events、sources、sync_enabled      |
 | `GET calendar/{id}`                          | 当前事件和全部修订版本                                                    |
-| `GET calendar-snapshots/{id}`                | 下载核对时保存的官方 HTML 原始字节，以纯文本附件返回，需登录              |
+| `GET calendar-snapshots/{id}`                | 下载统计局 HTML、BLS 日程 TSV 摘录或手动导入的 ICS 原文件，需登录         |
+| `POST calendar-imports/bls`                  | 预览上传的 BLS ICS。带 `?confirm=<token>` 和同一文件再次提交可确认变更    |
 | `POST calendar`                              | 补录有原文依据的事件，source 固定为 manual                                |
 | `PUT calendar/{id}`                          | 修改 manual/fund 的日期、状态和条件，需提交当前 version；版本冲突返回 409 |
 | `POST fund-drafts`                           | `{text,url}` 生成持久化草稿，尚不入历                                     |
@@ -17,6 +18,12 @@
 事件结构定义在 `apps/server/internal/calendar/store.go`，客户端类型见 `apps/web/src/calendar.ts`。日期精度为 `date` 时 start/end 为 `YYYY-MM-DD`，区间包含结束日；为 `minute` 时为带偏移的 RFC3339，偏移必须匹配 timezone。状态支持 scheduled、confirmed、rescheduled、cancelled。开始/结束或时区变化会自动产生改期版本；取消优先于改期。重要性为 1–3。API 不允许编辑官方来源事件。
 
 基金代码为六位字符串，草稿只提取明确标注的唯一代码和唯一完整日期区间；相对日期、多份额和多个区间需要人工填写。确认时使用服务器保存的原文及链接，客户端不能替换来源。原文上限 12000 UTF-8 字节。基金确认不调用模型；已开启自动提醒并关注该基金时，确认后的日历事件会进入提醒计划，草稿本身不会触发。
+
+## 手动导入 BLS 日历
+
+请求正文为 UTF-8 编码的 ICS 原文件，最多 2 MiB、3000 项，使用 `Content-Type: text/calendar`。预览返回 `token`、`changes`（新增、改期、取消、其他更新）、`unchanged` 及 `stale` 计数。预览不写库。确认时核对文件内容及相关事件版本，变更后返回 409，需要重新预览。重复提交已导入的文件返回 `already_imported: true`。文件格式错误、重复 UID、无法区分的统计期和重复规则返回 400，超过字节上限返回 413。
+
+同一 UID 或能识别为同一发布项目与统计期的条目沿用事件 ID，保留关注与修订历史。较旧的 ICS 版本跳过。文件缺项保留原事件，只有明确取消的日程才标记取消。确认后保存原始字节和摘要，来源标为「手动导入 ICS」。导入时间和自动同步的最后成功、错误分开记录。
 
 ## 自动提醒
 
@@ -48,11 +55,15 @@
 - [FOMC 日程](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm)：当年及未来会议日期区间，不推算决议、发布会或纪要时刻。
 - [BLS 日历](https://www.bls.gov/schedule/news_release/bls.ics)：基于 UID 更新，处理 iCalendar 换行、时区、日期与取消；未支持的重复规则明确报错。开发网络及首次服务器同步均返回 403，尚未通过真实来源验收。
 - [BEA 日程](https://www.bea.gov/news/schedule)：按发布主题及数据期匹配，保留官方时间并应用美国东部夏令时。
-- [纽约联储日历](https://www.newyorkfed.org/research/calendars/nationalecon_cal)：独立的 `nyfed` 补充来源，按美国东部日期限定为当前月及下一已发布月份。首页若为当月，跟随实际“下一月”链接；若提前显示下月，跟随实际“上一月”链接取回当月，不扩展至下下月。只访问核验过的同站相邻月份链接并校验返回页月份，原始时刻按东部夏令时转换。未知标题、缺失时刻、过期或跨度异常的首页明确报错；提前切月时缺少当月链接也不接受部分导入。当前及下月整批校验后入库，任一页面失败均保留上次数据。保留纽约联储日程及 BLS 指标链接；它不是完整 BLS 日程，不清除 `bls` 错误，也不自动合并两源。月末修复已在生产成功导入 11 项，下一周期同步与长时观察已签收。
+- 美国零售销售跟踪零售与餐饮服务销售额初值。按统计月份识别同一期，直接读取表内的发布日期和表头时刻，待定日期留待后续同步。[人口普查局发布日程](https://www.census.gov/retail/release_schedule.html)
+- 美国首次申领失业救济人数按劳工部公布的每周规则和例外表生成，从美国东部当天排到下月底。节假日例外替换同一周的常规发布，改期沿用事件 ID 和关注记录。[劳工部发布安排](https://oui.doleta.gov/unemploy/claims_arch.asp)
+- 纽约联储是独立的 `nyfed` 补充来源，按美国东部日期同步当月及已发布的下月。首页提前切月时沿同站链接回取当月，整批校验通过才入库。已识别的 BLS 指标在该发布月只有一个统计期时沿用原事件。若一个月有同一指标的两次发布，保留年表列出的两个统计期。纽约联储的成功和 BLS 的错误分别记录。[纽约联储日历](https://www.newyorkfed.org/research/calendars/nationalecon_cal)
+
+BLS 年表摘录覆盖 2026、2027 两年公开清单中全部带时刻的发布。启动时按官方项目和统计期导入。全国与州级非农基准初步修订是两个事件。随常规非农公布的最终基准修订写入该期详情，共用一次提醒。劳工部就业报告中明确给出的发布安排经人工核对后可更新同一事件。纽约联储可以更新年表中的近期常规事件，已由劳工部公告确认或 BLS 主源接管的事件由官方证据更新。改期沿用原事件 ID，主源取消状态优先。同步错误及最后成功时间独立于快照导入。[快照清单与维护步骤](../apps/server/internal/calendar/snapshots/README.md)
 
 用户已接受统计局官方快照作为初始化补充：`-collect` 或独立 `-calendar-snapshot` 启动时校验随程序附带的原文及 SHA-256，仅填补缺少的 2026 年日程。已有记录（含取消）保持不变；若已有比核对时间更新的主源成功同步，跳过补入。同一快照只导入一次，不改写主源成功时间、计数、游标或错误。原始 HTML、采集/核对时间和摘要保存在 `calendar_snapshots`，不执行 HTML。
 
-事件的可选 `provenance` 区分 `snapshot` 与 `supplement`；快照含 snapshot_id、retrieved_at、reviewed_at、sha256，补充来源含 authority_url。主源后续更新会移除当前事件的快照标记，旧版本仍保留。来源响应的 `snapshots` 分别给出导入条数、当前仍使用快照的条数及覆盖日期；这不同于来源成功计数。手工录入/基金确认不接受客户端伪造来源标记。
+事件的可选 `provenance` 区分 `snapshot`、`supplement` 和 `upload`。快照含 snapshot_id、retrieved_at、reviewed_at、sha256，补充来源含 authority_url，手动导入含 snapshot_id、reviewed_at、sha256 和格式 `ics`。主源后续更新会移除当前事件的快照或手动导入标记，旧版本仍保留。来源响应的 `snapshots` 分别给出导入条数、当前仍使用该份文件的条数及覆盖日期。手工录入和基金确认只使用服务器确定的来源标记。
 
 快照维护与后续改期限制见 [快照说明](../apps/server/internal/calendar/snapshots/README.md)。10 月 31 日修复版部署后，纽约联储即时重试成功，覆盖至 11 月 17 日；备份和重启检查通过，长时验收状态见 [实施状态](implementation-status.md)。统计局直接同步的 47 项已保留，旧快照未回填或覆盖。
 

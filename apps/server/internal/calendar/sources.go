@@ -17,6 +17,7 @@ import (
 )
 
 const nbsURL = "https://www.stats.gov.cn/xxgk/sjfb/fbrcb/"
+const blsICSURL = "https://www.bls.gov/schedule/news_release/bls.ics"
 
 // Annual schedules can take longer to download than small news responses.
 // Keep this deadline separate from the news collector and retain the 2 MiB cap.
@@ -38,9 +39,11 @@ func Sources() []Source {
 	return []Source{
 		{ID: "nbs", Name: "国家统计局", URL: nbsURL},
 		{ID: "fomc", Name: "美联储 FOMC", URL: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"},
-		{ID: "bls", Name: "美国 BLS", URL: "https://www.bls.gov/schedule/news_release/bls.ics"},
+		{ID: "bls", Name: "美国 BLS", URL: blsICSURL},
 		{ID: "bea", Name: "美国 BEA", URL: "https://www.bea.gov/news/schedule"},
 		{ID: "nyfed", Name: "纽约联储 · BLS 补充", URL: nyfedURL, Mode: "supplement", Note: nyfedNote},
+		{ID: "census", Name: "美国人口普查局", URL: censusRetailURL},
+		{ID: "dol", Name: "美国劳工部", URL: dolClaimsURL},
 	}
 }
 func Fetch(ctx context.Context, client *http.Client, rawURL string) (string, error) {
@@ -176,6 +179,10 @@ func Parse(source, rawURL, body string, year int) ([]Event, error) {
 			events, err = parseBEA(root, rawURL)
 		case "nyfed":
 			events, err = parseNYFed(root, rawURL)
+		case "census":
+			events, err = parseRetailSales(root, rawURL)
+		case "dol":
+			events, err = parseInitialClaims(root, rawURL, time.Now())
 		default:
 			err = errors.New("未知来源")
 		}
@@ -459,34 +466,79 @@ func parseBEA(root *html.Node, rawURL string) ([]Event, error) {
 }
 
 func parseICS(body, rawURL string) ([]Event, error) {
-	if !strings.Contains(body, "BEGIN:VCALENDAR") {
+	body = strings.TrimSpace(strings.TrimPrefix(body, "\ufeff"))
+	body = strings.ReplaceAll(body, "\r\n", "\n")
+	first, _, _ := strings.Cut(body, "\n")
+	if !strings.EqualFold(first, "BEGIN:VCALENDAR") {
 		return nil, errors.New("BLS 未返回 iCalendar")
 	}
-	body = strings.ReplaceAll(body, "\r\n", "\n")
 	body = strings.ReplaceAll(strings.ReplaceAll(body, "\n ", ""), "\n\t", "")
 	out := []Event{}
 	fields := map[string]string{}
 	params := map[string]string{}
-	inside := false
-	for _, line := range strings.Split(body, "\n") {
-		if line == "BEGIN:VEVENT" {
-			inside = true
-			fields = map[string]string{}
-			params = map[string]string{}
+	var stack []string
+	closed, cancelled := false, false
+	for line := range strings.SplitSeq(body, "\n") {
+		if line == "" {
 			continue
 		}
-		if line == "END:VEVENT" && inside {
-			inside = false
+		left, right, ok := strings.Cut(line, ":")
+		if !ok || closed {
+			return nil, errors.New("iCalendar 文件结构不完整")
+		}
+		key, par, _ := strings.Cut(left, ";")
+		key = strings.ToUpper(key)
+		if key == "BEGIN" {
+			component := strings.ToUpper(right)
+			if component == "VCALENDAR" && len(stack) != 0 {
+				return nil, errors.New("iCalendar 文件只能包含一个日历")
+			}
+			if component == "VEVENT" {
+				if len(stack) != 1 {
+					return nil, errors.New("iCalendar 事件嵌套无效")
+				}
+				fields, params = map[string]string{}, map[string]string{}
+			}
+			stack = append(stack, component)
+			continue
+		}
+		if key == "END" {
+			component := strings.ToUpper(right)
+			if len(stack) == 0 || stack[len(stack)-1] != component {
+				return nil, errors.New("iCalendar 组件结束标记不匹配")
+			}
+			stack = stack[:len(stack)-1]
+			closed = len(stack) == 0
+			if component != "VEVENT" {
+				continue
+			}
+			if len(out) >= 3000 {
+				return nil, errors.New("日程条目数量异常")
+			}
 			if fields["RRULE"] != "" || fields["RECURRENCE-ID"] != "" || fields["RDATE"] != "" || fields["EXDATE"] != "" {
 				return nil, errors.New("BLS 出现重复规则，需核查后再导入")
 			}
 			e := event("bls", fields["UID"], icsText(fields["SUMMARY"]), rawURL, "America/New_York")
+			if seq, ok := fields["SEQUENCE"]; ok {
+				value, err := strconv.ParseInt(seq, 10, 32)
+				if err != nil || value < 0 {
+					return nil, errors.New("iCalendar 事件版本无效")
+				}
+				e.ICSSequence = int(value)
+			}
+			if modified := fields["LAST-MODIFIED"]; modified != "" {
+				t, err := time.Parse("20060102T150405Z", modified)
+				if err != nil {
+					return nil, errors.New("iCalendar 修订时间无效")
+				}
+				e.ICSModified = t.Format(time.RFC3339)
+			}
 			if e.SourceID == "" {
 				return nil, errors.New("BLS 日程缺少 UID")
 			}
 			raw := fields["DTSTART"]
 			p := params["DTSTART"]
-			if strings.Contains(p, "VALUE=DATE") || len(raw) == 8 {
+			if len(raw) == 8 || strings.EqualFold(p, "VALUE=DATE") {
 				t, err := time.Parse("20060102", raw)
 				if err != nil {
 					return nil, err
@@ -502,8 +554,11 @@ func parseICS(body, rawURL string) ([]Event, error) {
 				}
 			} else {
 				zone := "America/New_York"
-				if strings.Contains(p, "TZID=") {
-					zone = strings.Split(strings.Split(p, "TZID=")[1], ";")[0]
+				for _, part := range strings.Split(p, ";") {
+					key, value, _ := strings.Cut(part, "=")
+					if strings.EqualFold(key, "TZID") {
+						zone = strings.Trim(value, `"`)
+					}
 				}
 				if zone == "US-Eastern" || zone == "US/Eastern" || zone == "Eastern Standard Time" {
 					zone = "America/New_York"
@@ -537,9 +592,9 @@ func parseICS(body, rawURL string) ([]Event, error) {
 					e.End = end.Format(time.RFC3339)
 				}
 			}
-			if fields["STATUS"] == "CANCELLED" {
+			if strings.EqualFold(fields["STATUS"], "CANCELLED") {
 				e.Status = "cancelled"
-			} else if fields["STATUS"] == "CONFIRMED" {
+			} else if strings.EqualFold(fields["STATUS"], "CONFIRMED") {
 				e.Status = "confirmed"
 			}
 			e.Evidence = icsText(fields["DESCRIPTION"])
@@ -549,18 +604,24 @@ func parseICS(body, rawURL string) ([]Event, error) {
 			out = append(out, e)
 			continue
 		}
-		if inside {
-			left, right, ok := strings.Cut(line, ":")
-			if !ok {
-				continue
+		if len(stack) == 1 && key == "METHOD" {
+			cancelled = strings.EqualFold(right, "CANCEL")
+		}
+		if len(stack) == 2 && stack[1] == "VEVENT" {
+			if _, exists := fields[key]; exists && (key == "UID" || key == "DTSTART" || key == "DTEND" || key == "STATUS") {
+				return nil, errors.New("iCalendar 事件含有重复的标识、时刻或状态")
 			}
-			key, par, _ := strings.Cut(left, ";")
 			fields[key] = right
 			params[key] = par
 		}
 	}
-	if inside {
+	if !closed {
 		return nil, errors.New("BLS 日程文件不完整")
+	}
+	if cancelled {
+		for i := range out {
+			out[i].Status = "cancelled"
+		}
 	}
 	return out, nil
 }
