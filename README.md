@@ -28,21 +28,21 @@ go -C apps/server mod download
 pnpm exec playwright install chromium
 ```
 
-本地运行完整构建，与生产保持同一个 HTTP 入口：
+本地预览 PWA 时先构建页面，初始化密码和同源地址，然后在两个终端运行 API 和静态预览：
 
 ```powershell
 pnpm build
-pnpm server -init -origin http://127.0.0.1:8787
+pnpm server -init -origin http://127.0.0.1:4173
 pnpm server
+# 第二个终端
+pnpm preview --host 127.0.0.1 --port 4173 --strictPort
 ```
 
-打开 <http://127.0.0.1:8787/finevent/>。初始化交互式读取密码，不回显；不会覆盖现有配置。`var/config.json` 包含密码散列与 VAPID 私钥，`var/` 不提交版本控制。
-
-`pnpm server` 在 `apps/server/` 执行 Go，默认读取仓库根目录的 `var/` 和前端产物 `apps/web/dist/`。额外传入的相对文件路径以 `apps/server/` 为基准。
+打开 <http://127.0.0.1:4173/finevent/>。预览服务将 API 和健康检查代理到回环地址 8787。已有本地配置若使用 8787 作为站点来源，可用 `pnpm server -listen 127.0.0.1:8788` 启动 API，在预览终端设置 `$env:FINEVENT_API_TARGET='http://127.0.0.1:8788'`，以原端口 8787 启动预览。Go 的数据目录默认为仓库根目录 `var/`，额外传入的相对路径以 `apps/server/` 为基准。密码散列与 VAPID 私钥保存在未纳入 Git 的 `var/config.json`。
 
 需要 Vite 热更新时，先运行 `pnpm server -init -data ../../var/dev -origin http://127.0.0.1:5173` 初始化独立数据目录，再在两个终端运行 `pnpm server -data ../../var/dev` 和 `pnpm dev --host 127.0.0.1`。自定义含密钥的数据目录应放在仓库根目录已忽略的 `var/` 下。开发模式不注册 Service Worker；真实 PWA 测试使用完整构建。
 
-`pnpm build` 检查前端和仓库工具类型，并将前端产物写入 `apps/web/dist/`。仅操作前端子项目时可使用 `pnpm --filter @finevent/web build`、`pnpm --filter @finevent/web test:unit`；Go 命令使用 `go -C apps/server <命令>`。发布包继续包含顶层 Go 程序、`dist/` 和 `deploy/`，供现有服务和安装器使用。
+`pnpm build` 检查前端和仓库工具类型，并将前端产物写入 `apps/web/dist/`。仅操作前端子项目时可使用 `pnpm --filter @finevent/web build`、`pnpm --filter @finevent/web test:unit`；Go 命令使用 `go -C apps/server <命令>`。前后端可以分别构建和发布。
 
 公共环境默认值位于 [apps/web/.env](apps/web/.env)，本地开发、构建与 CI 共用。`VITE_APP_TITLE` 控制浏览器标签页标题；个人覆盖可参考 [示例](apps/web/.env.example) 创建同目录的 `.env.local`，无需复制即可运行。`VITE_*` 会进入客户端产物，只能填写公开配置。Vite 开发服务集成 Vue DevTools；编辑器推荐见 [.vscode/extensions.json](.vscode/extensions.json)。
 
@@ -150,23 +150,34 @@ Copy-Item .deployment.example.json .deployment.local.json
 
 `.deployment.local.json` 不提交，也可用 `FINEVENT_DEPLOY_CONFIG` 指定仓库外的配置文件。源码中的域名和绝对部署路径为示例值；本地发布包和临时上传文件按配置渲染，保存在已忽略的 `release/`、`.validation/`。`-SshTarget` 可覆盖本次连接目标。本地默认构建、上传或 SSH 在配置缺失或非法时停止；通用构建不读取私有部署配置。站点和目录配置变化后重新渲染通用包即可，不必重新编译；不要公开发布带实际环境值的产物。配置与上传参数的本地回归为 `pwsh -NoProfile -NonInteractive -File scripts/test-deployment-config.ps1`，使用模拟命令，不连接服务器。
 
-### 通用产物与本地发布
+### 前后端独立发布
 
-`build-release.ps1` 使用当前 Node/pnpm 环境，版本按 `.node-version` 与 `package.json` 准备，无需在脚本中调用 fnm。默认命令继续生成 `release/finevent-<时间>.tar.gz`，现有 `publish-calendar.ps1`、`publish-news.ps1` 等发布入口不变。它先构建通用包，再用本地配置渲染部署文件；Go 程序和前端文件在渲染时保持不变。
+Nginx 从 `web/current` 提供 `/finevent/`，将 `/finevent/api/` 和 `/finevent/healthz` 转发给 Go。登录、推送与 PWA 使用同一来源。需要同时修改接口和页面时，先发布兼容在线及已缓存旧页面的 API，再发布新页面；维持上一个版本可回滚所需的接口兼容性。
 
-只构建可保存到 CI 的通用包，或将下载的通用包转换为本地发布包：
+| 组件   | 独立构建                                                 | 产物与安装                                                                                                                                                                                    |
+| ------ | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Web    | `./scripts/build-release.ps1 -Component web`             | `release/generic/web/finevent-web-<时间>.tar.gz` 只含静态文件及校验元数据，可直接发布。                                                                                                       |
+| Server | `./scripts/build-release.ps1 -Component server -Generic` | `release/generic/finevent-<时间>.tar.gz` 含 Linux amd64 程序、运维工具和模板。用 `./scripts/render-release.ps1 -Archive <通用包>` 生成环境包；直接运行 `build-release.ps1` 会完成构建和渲染。 |
+
+两种包分别记录组件、提交、工作区状态和文件摘要，旁附压缩包 SHA-256。前端只需要 Node/pnpm，后端只需要 Go，两端打包均使用 PowerShell、Git、tar 和 Python。CI 可用 `-SkipFrontendBuild` 将已通过浏览器测试的静态产物直接打包。后端包渲染仅替换部署模板；`scripts/test-release.ps1` 使用虚构配置验证摘要、文件边界和失败路径。
+
+**从旧合包迁移**。等正在执行的后端安装或观察结束，构建并核验新的后端环境包，用现有部署凭据更新控制器，再执行一次迁移：
 
 ```powershell
-.\scripts\build-release.ps1 -Generic
-python scripts/check-release.py release/generic/finevent-<时间>.tar.gz --kind generic
-.\scripts\render-release.ps1 -Archive release/generic/finevent-<时间>.tar.gz
-# 继续沿用已有发布及前序验收参数：
-.\scripts\publish-calendar.ps1 -Archive release/finevent-<时间>.tar.gz -AfterReview <上一轮完整ID>
+./scripts/bootstrap-deployment.ps1
+./scripts/deploy-probe.ps1 -MigrateWeb -Archive <新后端环境包>
 ```
 
-通用包位于 `release/generic/`，只含应用文件、部署模板和公开元数据，不含私有部署配置。`release.json` 记录实际检出的提交 SHA、工作区是否有未提交修改及目标平台；PR 的 SHA 是被测试的合并结果。包内 `sha256.json` 覆盖所有文件，包旁 `.sha256` 校验压缩包本身；渲染后记录原通用包摘要并重新计算文件摘要。下载后核对 Actions 运行、提交和包摘要；摘要用于完整性核对，不能代替来源确认。通用包未经渲染不能通过发布校验或安装器检查，旧格式部署包继续兼容。
+迁移以旧合包的文件清单校验并复制线上页面，建立 `web/current`，保存原 Nginx 路由，检查配置后重载 Nginx，并通过 HTTPS 核对入口、Worker 和预缓存清单。迁移失败会恢复原路由。切换后核对旧 PWA、会话和通知深链接，再按原有 `publish-calendar.ps1` 或 `publish-news.ps1` 流程发布后端。新装环境先安装后端并初始化控制器，再发布第一个前端包。
 
-`render-release.ps1` 可通过 `-ConfigPath` 指定配置、`-OutputDirectory` 指定输出目录，不覆盖已有发布包。`pwsh -NoProfile -NonInteractive -File scripts/test-release.ps1` 使用最近的通用包和虚构配置验证渲染与失败路径，不连接服务器。CI 在同一检出目录完成浏览器测试与构建后使用 `-SkipFrontendBuild` 复用该前端产物；普通本地构建不需要此参数。
+```powershell
+./scripts/publish-web.ps1 -Archive <前端包> -AfterReview initial
+./scripts/publish-web.ps1 -Report
+./scripts/publish-web.ps1 -Archive <下一前端包> -AfterReview <最新前端操作ID>
+./scripts/publish-web.ps1 -Rollback -AfterReview <最新前端操作ID>
+```
+
+前端发布与回滚只切换静态目录，旧页面引用过的带哈希资源仍可访问。HTTPS 内容检查失败会恢复先前的前端。请求中断时以原操作 ID 查询结果；`needs_recovery` 时核查操作记录的 `previous`、`target` 和实际 `web/current`；一致时可用相同操作 ID 和参数重试，完成已登记的切换。后端继续使用原发布目录、前序验收和数据库回滚流程。
 
 ### SSH 初始化与 Actions 部署
 
@@ -191,15 +202,15 @@ GitHub 的 `production` environment 仅允许 `main` 分支，配置三个 envir
 | `FINEVENT_SSH_KEY`       | 专用私钥文件内容  |
 | `FINEVENT_KNOWN_HOSTS`   | 已核对的主机记录  |
 
-手动运行 **Deploy**，提供成功的 main push **CI** 运行 ID、已审核的最新服务器操作 ID，以及 calendar 或 news 验证范围。流程核对同仓库、CI workflow、main 历史、artifact 来源与 GitHub 摘要、包摘要和干净提交 SHA，再临时渲染私有包并启动服务器观察；PR 产物、其他 workflow、过期产物或不匹配 SHA 均拒绝。生产 Deploy 串行且不取消正在执行的部署。`Re-run jobs` 保持相同操作 ID；重新 dispatch 是新操作，不能用来重试结果不明的安装。AI 付费验证不在 Actions 选项中。
+手动运行 **Deploy**，选择成功的 main push CI 运行和组件。两种产物都须通过同仓库、main 历史、GitHub artifact 来源与摘要、组件及干净提交 SHA 核对。选择 `web` 时传入最新前端操作 ID（首次填 `initial`）；选择 `server` 时传入已审核的后端前序及 calendar 或 news 验证范围。两端分别串行。`Re-run jobs` 沿用原操作 ID；结果不明时先查询原操作。
 
-手动运行 **Report**，填写具体操作 ID 或 `latest`。它仅查询既有报告，不启动安装、采集或模型调用；日志和摘要不包含完整服务器报告、地址及路径。本地 `publish-calendar.ps1 -Report -RunId <操作ID>` 可将完整私有报告下载到 `.validation/<操作ID>/report.json`，不依赖原发布电脑的指针。后台观察超出 job 生命周期，绿色的启动/查询 job 不代表生产验收完成。服务器保留完整报告、备份、回滚依据和控制器私有日志；恢复前核对当前状态。
+手动运行 **Report**，填写具体操作 ID，或用 `latest` 查询后端、`latest-web` 查询前端。它仅查询既有报告，不启动安装、采集或模型调用；日志和摘要不包含完整服务器报告、地址及路径。本地 `publish-calendar.ps1 -Report -RunId <操作ID>` 可将完整私有报告下载到 `.validation/<操作ID>/report.json`，不依赖原发布电脑的指针。后台观察超出 job 生命周期，绿色的启动/查询 job 不代表生产验收完成。服务器保留完整报告、备份、回滚依据和控制器私有日志；恢复前核对当前状态。
 
 已完成专用 SSH 初始化、production Secrets、真实 Report、非法 CI 来源拒绝及同一 Deploy 重跑幂等验证。首次生产 Deploy 被旧固化证据的七天有效期拦在安装前；随后通过只读基线复验，以显式恢复完成实际安装，原失败记录保留。生产 PWA 更新、主要导航与旧深链接、手机通知点击和 65 分钟新闻/资源观察已通过本批验收，最终 Report 成功；证据与范围见[验收状态](docs/implementation-status.md#actions-部署验收)。
 
 固化证据过期时，可用 `pwsh -NoProfile -File scripts/verify-baseline.ps1 -Archive <已核对来源的环境渲染包>` 启动 65 分钟只读复验；使用 `-Report -RunId <persistence-check-ID>` 下载完整报告，Actions **Report** 也接受该 ID。复验不重建容器、不重启服务、不触发采集或模型请求；核对原固化文件/容器/配置、连续资源采样、至少两轮正常采集及 HTTPS。它明确保留旧记录的保留期缺口，只为新观察窗口及之后提供证据。报告完成并审核后，发布显式传入 `-BaselineId` 与 `-BaselineSha256`（Actions 对应 `baseline_id` / `baseline_sha256`）；七天有效期、窗口结束后的连续历史及现有资源门禁仍生效。
 
-若最新部署明确在安装前失败，审核原报告后可同时传入 `-RecoverPreflight <失败ID>`、`-FailedReportSha256 <报告摘要>`，`-AfterReview` 仍指向前一个已完成验收的操作；Actions 使用相应的 snake_case 参数。仅接受已停止、未进入安装、无安装/回滚/观察替换痕迹的 calendar/news 失败；重新复核原前序验收及当前版本，保留失败记录，以新 ID 登记恢复操作。报告变化、进程仍活动、安装结果不明或 AI 初始化失败均不能用此入口放行。服务端控制器需升级到协议 2：沿用已有专用密钥再次运行初始化脚本即可，不改变生产应用。
+若最新部署明确在安装前失败，审核原报告后可同时传入 `-RecoverPreflight <失败ID>`、`-FailedReportSha256 <报告摘要>`，`-AfterReview` 仍指向前一个已完成验收的操作；Actions 使用相应的 snake_case 参数。仅接受已停止、未进入安装、无安装/回滚/观察替换痕迹的 calendar/news 失败；重新复核原前序验收及当前版本，保留失败记录，以新 ID 登记恢复操作。报告变化、进程仍活动、安装结果不明或 AI 初始化失败均不能用此入口放行。服务端该恢复功能要求控制器协议 2 或更高，独立前端发布使用协议 3：沿用已有专用密钥再次运行初始化脚本即可，不改变生产应用。
 
 部署预检与只读基线复验按原固化报告核对 OOM 计数。对 `calendar-release-…` 已确认的验收进程 OOM，两份报告的 SHA-256 均匹配时才承认主机计数从 19 变为 20。此后计数增加或回退、Finevent 或 TrendRadar 计数变化，均会阻止验收。
 
@@ -220,13 +231,13 @@ GitHub 的 `production` environment 仅允许 `main` 分支，配置三个 envir
 .\scripts\deploy-probe.ps1
 ```
 
-构建在本地完成，上传 linux/amd64 程序及静态资源。SSH 与 SCP 使用已有主机指纹，可能分别要求输入服务器密码；只在本机终端输入。首次部署另外设置 finevent 的独立访问密码。
+该入口安装 Linux amd64 后端；前端使用独立静态包发布。SSH 与 SCP 使用已有主机指纹，可能分别要求输入服务器密码；只在本机终端输入。首次部署另外设置 finevent 的独立访问密码。
 
 安装器校验文件摘要，定位现有域名唯一的 HTTPS server 块，只加入 `/finevent/` 的独立 location include。创建受限的 finevent 系统账户和 systemd 服务，回环监听 8787；限制 96 MiB 内存、无 Swap，Go 内存目标 64 MiB。不会启动或重启 TrendRadar。
 
 登录及安装 PWA 统一使用 `https://www.example.com/finevent/`。Nginx 将其他站点别名下的 `/finevent/` 请求重定向到该地址，保留路径与查询参数；部署检查会验证不带 `www` 的入口确实跳转。应用继续严格校验请求来源。
 
-安装器发布前检查可用内存和磁盘、备份既有 finevent 数据库与配置；启动后检查一分钟资源和原 TrendRadar 入口，再启用服务。失败恢复旧程序与 Nginx 配置，保留失败证据。日历发布入口在此基础上执行上述更长的观察。报告会给出精确回滚命令，手工回滚会拒绝覆盖部署后另行修改的配置。
+后端安装器发布前检查可用内存和磁盘、备份既有 finevent 数据库与配置；启动后检查一分钟资源和原 TrendRadar 入口，再启用服务。失败恢复旧程序及本次安装改动的配置，保留失败证据。日历发布入口在此基础上执行上述更长的观察。报告会给出精确回滚命令，手工回滚会拒绝覆盖部署后另行修改的配置。
 
 Nginx 重载后，每个 HTTPS 入口最多检查六次，失败间隔一秒；每次请求最长五秒。检查直连本机并校验证书，不受代理和 curl 用户配置影响。`https-checks.json` 在本次备份目录内保留状态码、响应摘要和重试记录；持续失败时另外记录 `local-health.json` 后回滚。终端会显示最后一次错误，便于区分服务故障与 HTTPS 路由故障。
 
@@ -385,9 +396,9 @@ Nginx 重载后，每个 HTTPS 入口最多检查六次，失败间隔一秒；�
 
 ## CI
 
-[GitHub Actions](.github/workflows/ci.yml) 在 PR 创建、更新、重开及编辑，`main` 推送和手动触发时执行冻结安装、格式、Lint、前端与知识工具单测、Go 测试及 vet、部署工具回归和 Chromium 冒烟。浏览器入口包含类型检查及构建，随后复用前端产物编译 Linux amd64 程序、打包并验证本地渲染。PR 还会检查事件 base/head 之间全部非 merge 提交的信息，不检查 PR 标题。
+[GitHub Actions](.github/workflows/ci.yml) 在 PR 创建、更新、重开及编辑，`main` 推送和手动触发时执行冻结安装、格式、Lint、前端与知识工具单测、Go 测试及 vet、部署工具回归和 Chromium 冒烟。浏览器入口包含类型检查及构建，随后分别打包静态文件、编译 Linux amd64 程序并验证后端环境渲染。PR 还会检查事件 base/head 之间全部非 merge 提交的信息，不检查 PR 标题。
 
-所有必要步骤（包括通用包构建、渲染回归及上传）成功后才通过 PR 的 `Quality` 汇总检查；主分支及手动运行显示 `CI result`。通用包以 `finevent-linux-amd64-<检出SHA>` 命名，作为 Actions artifact 保留 14 天；失败浏览器报告保留 7 天。只上传 `release/generic/` 的压缩包与摘要，本地渲染包和 `.validation/` 不上传。Actions 固定提交 SHA，Dependabot 每周检查其更新；过期运行自动取消。Lint warning 沿用基线默认行为，不额外阻断。
+所有必要步骤（包括通用包构建、渲染回归及上传）成功后才通过 PR 的 `Quality` 汇总检查；主分支及手动运行显示 `CI result`。通用包以 `finevent-web-<检出SHA>` 和 `finevent-server-<检出SHA>` 命名，作为 Actions artifact 保留 14 天；失败浏览器报告保留 7 天。只上传 `release/generic/` 的压缩包与摘要，本地渲染包和 `.validation/` 不上传。Actions 固定提交 SHA，Dependabot 每周检查其更新；过期运行自动取消。Lint warning 沿用基线默认行为，不额外阻断。
 
 `main` 已配置分支保护：通过 PR 合入，要求分支与主分支同步、GitHub Actions 提供的 `Quality` 成功；管理员同样受约束，禁止强推及删除，仓库仅允许 rebase merge。个人仓库不额外要求他人审批。平台配置与仓库重建记录见 [实施状态](docs/implementation-status.md#github-仓库重建)；本地检查不能替代 PR 最新提交的远端结果。
 

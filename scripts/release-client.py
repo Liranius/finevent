@@ -79,6 +79,17 @@ def deploy(ssh, archive, run_id, profile, after_review, replace_observation, tra
     return transport(ssh, request, archive)
 
 
+def publish_web(ssh, archive, run_id, after_review):
+    request = {'action': 'web-deploy' if archive else 'web-rollback', 'id': run_id, 'after_review': after_review}
+    if archive:
+        files = runpy.run_path(str(ROOT/'scripts/check-release.py'))['check_archive'](archive, 'generic')
+        if json.loads(files['release.json']).get('component') != 'web':
+            raise RuntimeError('Expected a web archive')
+        request.update(content_sha256=controller['content_digest'](files),
+                       archive_sha256=hashlib.sha256(Path(archive).read_bytes()).hexdigest())
+    return request_remote(ssh, request, archive)
+
+
 def write_json(path, data):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -87,7 +98,7 @@ def write_json(path, data):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('mode', choices=('preflight', 'status', 'deploy', 'baseline', 'bootstrap'))
+    parser.add_argument('mode', choices=('preflight', 'status', 'deploy', 'baseline', 'bootstrap', 'web-deploy', 'web-rollback'))
     parser.add_argument('--target', required=True)
     parser.add_argument('--identity', default=os.environ.get('FINEVENT_SSH_KEY_FILE', str(ROOT/'.validation/deploy-access/id_ed25519')))
     parser.add_argument('--known-hosts', default=os.environ.get('FINEVENT_KNOWN_HOSTS_FILE', str(ROOT/'.validation/deploy-access/known_hosts')))
@@ -111,7 +122,13 @@ def main():
         if result.returncode:
             raise RuntimeError('One-time server initialization failed')
         return
-    if args.mode in ('deploy', 'baseline'):
+    if args.mode in ('web-deploy', 'web-rollback'):
+        if (args.mode == 'web-deploy') != bool(args.archive):
+            raise RuntimeError('Only web-deploy takes a web archive')
+        run_id = args.id or 'web-release-'+datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')+'-'+uuid.uuid4().hex[:8]
+        print('Operation: '+run_id, flush=True)
+        result = publish_web(ssh, args.archive, run_id, args.after_review)
+    elif args.mode in ('deploy', 'baseline'):
         if not args.archive:
             raise RuntimeError('Archive is required')
         if args.mode == 'baseline' and (args.after_review or args.replace_observation or any(getattr(args, key) for key in controller['EVIDENCE_OPTIONS'])):

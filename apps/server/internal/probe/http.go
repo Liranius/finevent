@@ -11,8 +11,6 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -30,7 +28,6 @@ type App struct {
 	Store               *Store
 	Client              *http.Client
 	CalendarClient      *http.Client
-	Web                 string
 	CollectionEnabled   bool
 	TrendEnabled        bool
 	TrendSettingsSocket string
@@ -45,8 +42,8 @@ type App struct {
 	loginWindow         time.Time
 }
 
-func NewApp(c Config, s *Store, web string) *App {
-	return &App{Config: c, Store: s, Web: web, analysisWake: make(chan struct{}, 1), CalendarClient: calendar.NewHTTPClient(), Client: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
+func NewApp(c Config, s *Store) *App {
+	return &App{Config: c, Store: s, analysisWake: make(chan struct{}, 1), CalendarClient: calendar.NewHTTPClient(), Client: &http.Client{Timeout: 15 * time.Second, CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse }}}
 }
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -116,7 +113,6 @@ func (a *App) Handler() http.Handler {
 		}
 		writeJSON(w, 200, map[string]string{"status": "ok", "stage": "verification"})
 	})
-	m.HandleFunc("GET /finevent/", a.static)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "same-origin")
@@ -363,37 +359,4 @@ func (a *App) status(w http.ResponseWriter, r *http.Request) {
 	}
 	result["latencies"] = latencies
 	writeJSON(w, 200, result)
-}
-
-func (a *App) static(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/finevent/")
-	if name == "" {
-		name = "index.html"
-	}
-	if !filepath.IsLocal(name) || strings.HasPrefix(name, "api/") {
-		http.NotFound(w, r)
-		return
-	}
-	path := filepath.Join(a.Web, filepath.FromSlash(name))
-	info, e := os.Stat(path)
-	if e != nil || info.IsDir() {
-		http.NotFound(w, r)
-		return
-	}
-	if name == "sw.js" || name == "index.html" || name == "precache.json" {
-		w.Header().Set("Cache-Control", "no-cache")
-	} else if strings.HasPrefix(name, "assets/") {
-		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
-	}
-	if name == "sw.js" {
-		w.Header().Set("Service-Worker-Allowed", "/finevent/")
-	}
-	// ServeContent avoids FileServer's /index.html redirect, needed for the shell's precache.
-	f, e := os.Open(path)
-	if e != nil {
-		http.NotFound(w, r)
-		return
-	}
-	defer f.Close()
-	http.ServeContent(w, r, name, info.ModTime(), f)
 }

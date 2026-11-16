@@ -18,14 +18,23 @@ class ArtifactTests(unittest.TestCase):
         self.run = {'id': 42, 'event': 'push', 'head_branch': 'main', 'status': 'completed', 'conclusion': 'success', 'head_sha': 'a'*40,
                     'repository': {'id': 7, 'full_name': 'owner/project'}, 'head_repository': {'full_name': 'owner/project'}, 'workflow_id': 8}
         self.workflow = {'id': 8, 'path': '.github/workflows/ci.yml'}
-        self.artifact = {'id': 9, 'name': 'finevent-linux-amd64-'+'a'*40, 'expired': False, 'digest': 'sha256:'+'b'*64,
+        self.artifact = {'id': 9, 'name': 'finevent-server-'+'a'*40, 'expired': False, 'digest': 'sha256:'+'b'*64,
                          'workflow_run': {'id': 42, 'head_sha': 'a'*40, 'head_branch': 'main', 'repository_id': 7, 'head_repository_id': 7}}
 
     def select(self, run=None, artifacts=None):
-        return ACTIONS['select_artifact']('owner/project', run or self.run, self.workflow, [self.artifact] if artifacts is None else artifacts)
+        return ACTIONS['select_artifact']('owner/project', run or self.run, self.workflow, [self.artifact] if artifacts is None else artifacts, "server")
 
     def test_successful_same_repository_main_ci(self):
         self.assertEqual(self.select()['id'], 9)
+
+    def test_web_and_server_artifacts_are_selected_independently(self):
+        web = {**self.artifact, 'id': 10, 'name': 'finevent-web-'+self.run['head_sha']}
+        artifacts = [self.artifact, web]
+        self.assertEqual(self.select(artifacts=artifacts)['id'], 9)
+        selected = ACTIONS['select_artifact']('owner/project', self.run, self.workflow, artifacts, 'web')
+        self.assertEqual(selected['id'], 10)
+        with self.assertRaisesRegex(RuntimeError, 'exactly one'):
+            self.select(artifacts=[web])
 
     def test_failed_pr_incomplete_and_foreign_runs_are_rejected(self):
         for change in ({'event': 'pull_request'}, {'head_branch': 'feature'}, {'status': 'in_progress'}, {'conclusion': 'failure'}, {'workflow_id': 99}, {'head_repository': {'full_name': 'other/project'}}):
@@ -51,7 +60,7 @@ class ArtifactTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.archive = root/'finevent-20261109T163000Z.tar.gz'
-            bundles.ReleaseBundleTests.write(self, bundles.fixture())
+            bundles.ReleaseBundleTests.write(self, bundles.server_fixture())
             data = self.archive.read_bytes()
             sidecar = hashlib.sha256(data).hexdigest()+'  '+self.archive.name
             zip_path = root/'artifact.zip'
@@ -66,16 +75,16 @@ class ArtifactTests(unittest.TestCase):
             output.mkdir()
             digest = write()
             with self.assertRaisesRegex(RuntimeError, 'digest'):
-                ACTIONS['unpack_artifact'](zip_path, 'sha256:'+'0'*64, 'a'*40, output)
+                ACTIONS['unpack_artifact'](zip_path, 'sha256:'+'0'*64, 'a'*40, output, 'server')
             with self.assertRaisesRegex(RuntimeError, 'files'):
-                ACTIONS['unpack_artifact'](zip_path, write(extra=True), 'a'*40, output)
+                ACTIONS['unpack_artifact'](zip_path, write(extra=True), 'a'*40, output, 'server')
             with self.assertRaisesRegex(RuntimeError, 'sidecar'):
-                ACTIONS['unpack_artifact'](zip_path, write(checksum='wrong'), 'a'*40, output)
+                ACTIONS['unpack_artifact'](zip_path, write(checksum='wrong'), 'a'*40, output, 'server')
             with self.assertRaisesRegex(RuntimeError, 'selected clean'):
-                ACTIONS['unpack_artifact'](zip_path, write(), 'c'*40, output)
+                ACTIONS['unpack_artifact'](zip_path, write(), 'c'*40, output, 'server')
             good = root/'good'
             good.mkdir()
-            self.assertTrue(ACTIONS['unpack_artifact'](zip_path, write(), 'a'*40, good).is_file())
+            self.assertTrue(ACTIONS['unpack_artifact'](zip_path, write(), 'a'*40, good, 'server').is_file())
 
 
 if __name__ == '__main__':

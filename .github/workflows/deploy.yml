@@ -7,8 +7,13 @@ on:
         description: Successful main push CI run ID
         required: true
         type: string
+      component:
+        description: Component to publish
+        type: choice
+        required: true
+        options: [server, web]
       after_review:
-        description: Reviewed completed operation ID (latest unless recovering a pre-install failure)
+        description: Reviewed operation of this component (initial for the first web release)
         required: true
         type: string
       baseline_id:
@@ -35,7 +40,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: production-deploy
+  group: production-deploy-${{ inputs.component }}
   cancel-in-progress: false
 
 jobs:
@@ -52,6 +57,7 @@ jobs:
       - name: Verify artifact, render privately and launch once
         env:
           GH_TOKEN: ${{ github.token }}
+          COMPONENT: ${{ inputs.component }}
           CI_RUN: ${{ inputs.ci_run }}
           AFTER_REVIEW: ${{ inputs.after_review }}
           PROFILE: ${{ inputs.profile }}
@@ -63,7 +69,7 @@ jobs:
           FINEVENT_SSH_KEY: ${{ secrets.FINEVENT_SSH_KEY }}
           FINEVENT_KNOWN_HOSTS: ${{ secrets.FINEVENT_KNOWN_HOSTS }}
         run: >-
-          python3 scripts/actions-release.py deploy --ci-run "$CI_RUN" --after-review "$AFTER_REVIEW" --profile "$PROFILE"
+          python3 scripts/actions-release.py deploy --component "$COMPONENT" --ci-run "$CI_RUN" --after-review "$AFTER_REVIEW" --profile "$PROFILE"
           --baseline-id "$BASELINE_ID" --baseline-sha256 "$BASELINE_SHA256"
           --recover-preflight "$RECOVER_PREFLIGHT" --failed-report-sha256 "$FAILED_REPORT_SHA256"
       - name: Remove private render workspace

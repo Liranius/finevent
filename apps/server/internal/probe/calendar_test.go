@@ -60,7 +60,7 @@ func TestOfficialSnapshotDownloadRequiresSessionAndDoesNotRenderHTML(t *testing.
 }
 
 func TestCalendarTimeoutDoesNotExtendNewsRequests(t *testing.T) {
-	a := NewApp(Config{}, nil, "")
+	a := NewApp(Config{}, nil)
 	if a.Client == a.CalendarClient || a.Client.Timeout != 15*time.Second || a.CalendarClient.Timeout != calendar.RequestTimeout {
 		t.Fatal("calendar and news require separate request deadlines")
 	}

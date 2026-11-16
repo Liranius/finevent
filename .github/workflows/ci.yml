@@ -92,6 +92,13 @@ jobs:
       - name: Deployment tests
         id: deployment
         run: |
+          if ! command -v nginx >/dev/null; then
+            sudo apt-get update -qq
+            mkdir "$RUNNER_TEMP/finevent-nginx"
+            (cd "$RUNNER_TEMP/finevent-nginx" && apt-get download nginx && dpkg-deb -x ./nginx_*.deb .)
+            export FINEVENT_TEST_NGINX="$RUNNER_TEMP/finevent-nginx/usr/sbin/nginx"
+            "$FINEVENT_TEST_NGINX" -v
+          fi
           python3 -m venv "$RUNNER_TEMP/finevent-deploy-tests"
           "$RUNNER_TEMP/finevent-deploy-tests/bin/pip" install PyYAML==6.0.3
           "$RUNNER_TEMP/finevent-deploy-tests/bin/python" -m unittest discover -s deploy -p 'test_*.py'
@@ -104,27 +111,6 @@ jobs:
       - name: Type check, build and browser smoke test
         id: e2e
         run: pnpm run test:e2e --global-timeout=300000
-
-      - name: Build generic release
-        id: release
-        shell: pwsh
-        run: ./scripts/build-release.ps1 -Generic -SkipFrontendBuild
-
-      - name: Verify local rendering and release boundaries
-        id: release-test
-        shell: pwsh
-        run: ./scripts/test-release.ps1
-
-      - name: Upload generic release
-        id: artifact
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: finevent-linux-amd64-${{ github.sha }}
-          path: |
-            release/generic/*.tar.gz
-            release/generic/*.tar.gz.sha256
-          if-no-files-found: error
-          retention-days: 14
 
       - name: Upload browser failure report
         if: ${{ failure() && steps.e2e.outcome == 'failure' }}
@@ -148,7 +134,7 @@ jobs:
           import { appendFileSync } from 'node:fs';
 
           const steps = JSON.parse(process.env.STEP_RESULTS);
-          const required = ['checkout', 'node', 'pnpm', 'go', 'install', 'format', 'lint', 'unit', 'go-test', 'go-vet', 'deployment', 'chromium', 'e2e', 'release', 'release-test', 'artifact'];
+          const required = ['checkout', 'node', 'pnpm', 'go', 'install', 'format', 'lint', 'unit', 'go-test', 'go-vet', 'deployment', 'chromium', 'e2e'];
           if (process.env.GITHUB_EVENT_NAME === 'pull_request') required.push('commits');
           const failed = required.filter((id) => steps[id]?.outcome !== 'success');
           if (failed.length) throw new Error(`Required steps did not succeed: ${failed.join(', ')}`);
@@ -156,9 +142,96 @@ jobs:
           appendFileSync(process.env.GITHUB_OUTPUT, 'verified=true\n');
           NODE
 
+  web:
+    name: Build web
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        id: node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Setup pnpm
+        id: pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          cache: true
+
+      - name: Install dependencies
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build static web release
+        id: web-release
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -Component web -Generic
+
+      - name: Upload web release
+        id: artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: finevent-web-${{ github.sha }}
+          path: |
+            release/generic/web/*.tar.gz
+            release/generic/web/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+  server:
+    name: Build server
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      artifact: ${{ steps.artifact.outputs.artifact-id }}
+    steps:
+      - name: Checkout
+        id: checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Go
+        id: go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: apps/server/go.mod
+          cache-dependency-path: apps/server/go.sum
+
+      - name: Build generic server release
+        id: release
+        shell: pwsh
+        run: ./scripts/build-release.ps1 -Component server -Generic
+
+      - name: Verify local rendering and release boundaries
+        id: release-test
+        shell: pwsh
+        run: ./scripts/test-release.ps1
+
+      - name: Upload server release
+        id: artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: finevent-server-${{ github.sha }}
+          path: |
+            release/generic/*.tar.gz
+            release/generic/*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
   quality:
     name: ${{ github.event_name == 'pull_request' && 'Quality' || 'CI result' }}
-    needs: checks
+    needs: [checks, web, server]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -166,9 +239,17 @@ jobs:
       - name: Require successful checks
         shell: bash
         env:
+          WEB_RESULT: ${{ needs.web.result }}
+          SERVER_RESULT: ${{ needs.server.result }}
+          WEB_ARTIFACT: ${{ needs.web.outputs.artifact }}
+          SERVER_ARTIFACT: ${{ needs.server.outputs.artifact }}
           CHECKS_RESULT: ${{ needs.checks.result }}
           STEPS_VERIFIED: ${{ needs.checks.outputs.verified }}
         run: |
+          test "$WEB_RESULT" = success
+          test -n "$WEB_ARTIFACT"
+          test "$SERVER_RESULT" = success
+          test -n "$SERVER_ARTIFACT"
           test "$CHECKS_RESULT" = success
           test "$STEPS_VERIFIED" = true
 

@@ -38,7 +38,7 @@ if ($Report) {
         $Archive = (Get-ChildItem -LiteralPath 'release' -Filter 'finevent-*.tar.gz' -File | Sort-Object Name -Descending | Select-Object -First 1).FullName
     }
     if (-not $Archive -or -not (Test-Path -LiteralPath $Archive -PathType Leaf)) { throw 'Build the calendar release first' }
-    & python scripts/check-release.py $Archive
+    & python scripts/check-release.py $Archive --component server
     if ($LASTEXITCODE -ne 0) { throw 'Release verification failed; nothing uploaded' }
     & python -c "import sys,tarfile; t=tarfile.open(sys.argv[1]); assert any(m.name.lstrip('./') == 'deploy/calendar_release.py' for m in t.getmembers()), 'Calendar release runner missing'" $Archive
     if ($LASTEXITCODE -ne 0) { throw 'This archive does not contain the calendar deployment workflow' }

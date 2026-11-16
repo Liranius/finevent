@@ -1,5 +1,6 @@
 param(
     [string]$SshTarget,
+    [switch]$MigrateWeb,
     [string]$Archive
 )
 $ErrorActionPreference = 'Stop'
@@ -11,7 +12,7 @@ if (-not $Archive) {
     $Archive = (Get-ChildItem -LiteralPath 'release' -Filter 'finevent-*.tar.gz' -File | Sort-Object Name -Descending | Select-Object -First 1).FullName
 }
 if (-not $Archive -or -not (Test-Path -LiteralPath $Archive -PathType Leaf)) { throw 'Build a release first' }
-& python scripts/check-release.py $Archive
+& python scripts/check-release.py $Archive --component server
 if ($LASTEXITCODE -ne 0) { throw 'Release verification failed; nothing uploaded' }
 $archiveName = Split-Path -Leaf $Archive
 if ($archiveName -notmatch '^finevent-\d{8}T\d{6}Z\.tar\.gz$') { throw 'Unexpected release filename' }
@@ -23,7 +24,8 @@ try {
     Invoke-FineventScp -o StrictHostKeyChecking=yes $Archive "${SshTarget}:/tmp/$archiveName"
     $uploadExit = $LASTEXITCODE
     if ($uploadExit -ne 0) { throw 'Upload failed' }
-    Invoke-FineventSsh -t -o StrictHostKeyChecking=yes $SshTarget "mkdir -p '$remoteStage' && tar -xzf '/tmp/$archiveName' -C '$remoteStage' && python3 '$remoteStage/deploy/install.py'"
+    $installMode = if ($MigrateWeb) { " --migrate-web" } else { "" }
+    Invoke-FineventSsh -t -o StrictHostKeyChecking=yes $SshTarget "mkdir -p '$remoteStage' && tar -xzf '/tmp/$archiveName' -C '$remoteStage' && python3 '$remoteStage/deploy/install.py'$installMode"
     $deploymentExit = $LASTEXITCODE
     if ($deploymentExit -ne 0) { throw 'Deployment did not finish. Read the remote error; prior services are preserved or restored.' }
 } finally {

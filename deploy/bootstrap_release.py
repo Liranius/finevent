@@ -58,7 +58,7 @@ def install(source, root=Path('/')):
     library.mkdir(mode=0o700, exist_ok=True)
     library.chmod(0o700)
     os.chown(library, 0, 0)
-    for name in ('release_control.py', 'check-release.py', 'config.json'):
+    for name in ('release_control.py', 'web_release.py', 'check-release.py', 'config.json'):
         destination = library/name
         require(not destination.is_symlink(), 'Unexpected controller file link')
         temporary = library/(name+'.new')
