@@ -210,7 +210,9 @@ GitHub 的 `production` environment 仅允许 `main` 分支，配置三个 envir
 
 已完成专用 SSH 初始化、production Secrets、真实 Report、非法 CI 来源拒绝及同一 Deploy 重跑幂等验证。首次生产 Deploy 被旧固化证据的七天有效期拦在安装前；随后通过只读基线复验，以显式恢复完成实际安装，原失败记录保留。生产 PWA 更新、主要导航与旧深链接、手机通知点击和 65 分钟新闻/资源观察已通过本批验收，最终 Report 成功；证据与范围见[验收状态](docs/implementation-status.md#actions-部署验收)。
 
-固化证据过期时，可用 `pwsh -NoProfile -File scripts/verify-baseline.ps1 -Archive <已核对来源的环境渲染包>` 启动 65 分钟只读复验；使用 `-Report -RunId <persistence-check-ID>` 下载完整报告，Actions **Report** 也接受该 ID。复验不重建容器、不重启服务、不触发采集或模型请求；核对原固化文件/容器/配置、连续资源采样、至少两轮正常采集及 HTTPS。它明确保留旧记录的保留期缺口，只为新观察窗口及之后提供证据。报告完成并审核后，发布显式传入 `-BaselineId` 与 `-BaselineSha256`（Actions 对应 `baseline_id` / `baseline_sha256`）；七天有效期、窗口结束后的连续历史及现有资源门禁仍生效。
+后端发布默认从已审核的上一次后端验收报告读取基线。新闻和日历验收直接使用最终重启后的采样，交互式 AI 验收在最后一次重启后补做 65 分钟只读观察。报告的 `next_baseline` 给出私有证据文件 `next-baseline.json` 的摘要和窗口结束时间。下次发布会核对摘要、距窗口结束不超过七天、当前版本和进程身份、配置、连续资源记录、至少两轮正常采集及 HTTPS。通过后直接进入安装。旧报告缺少证据、证据过期、身份变化或历史断档时，服务器会在安装前自动观察 65 分钟，私有报告的 `preflight_baseline` 记录原因和预计结束时间。新 OOM、已发现的内存压力及固化配置异常仍会阻断安装。纯前端发布和回退都使用独立的前端发布记录。
+
+也可用 `pwsh -NoProfile -File scripts/verify-baseline.ps1 -Archive <已核对来源的环境渲染包>` 单独启动只读复验，以 `-Report -RunId <persistence-check-ID>` 或 Actions **Report** 下载报告。审核后可用 `-BaselineId` 与 `-BaselineSha256`（Actions 对应 `baseline_id` / `baseline_sha256`）指定该份证据。显式指定的报告须通过七天有效期和连续历史检查。只读观察不会重启服务或触发采集、模型请求，其证据范围从本次观察开始。
 
 若最新部署明确在安装前失败，审核原报告后可同时传入 `-RecoverPreflight <失败ID>`、`-FailedReportSha256 <报告摘要>`，`-AfterReview` 仍指向前一个已完成验收的操作；Actions 使用相应的 snake_case 参数。仅接受已停止、未进入安装、无安装/回滚/观察替换痕迹的 calendar/news 失败；重新复核原前序验收及当前版本，保留失败记录，以新 ID 登记恢复操作。报告变化、进程仍活动、安装结果不明或 AI 初始化失败均不能用此入口放行。服务端该恢复功能要求控制器协议 2 或更高，独立前端发布使用协议 3：沿用已有专用密钥再次运行初始化脚本即可，不改变生产应用。
 

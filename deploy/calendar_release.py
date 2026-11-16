@@ -188,6 +188,7 @@ def inspect_persistence(accepted):
     require(shutil.disk_usage('/opt').free >= 1024**3 and shutil.disk_usage(BACKUPS).free >= 1024**3,
             'At least 1 GiB free space is required for release and backups')
     pid = service_pid()
+    require(Path(f'/proc/{pid}/exe').samefile(previous/'finevent'), 'Running binary differs from the active release')
     baseline = sample(current, pid)
     check_persistence_oom(accepted, baseline)
     require(baseline['available'] >= 128*MIB, 'Less than 128 MiB current host headroom')
@@ -195,37 +196,60 @@ def inspect_persistence(accepted):
             'config_sha256': recovery.sha(DATA/'config.json'), 'finevent_pid': pid}
 
 
-def preflight(directory, baseline_id=None, baseline_sha256=None):
-    evidence = BACKUPS/PERSIST_ID
-    accepted = json.loads((evidence/'report.json').read_text())
-    if baseline_id:
-        import persistence_baseline
-        renewed = persistence_baseline.load(baseline_id, baseline_sha256)
-        finished = datetime.fromisoformat(renewed['observation_ended']).timestamp()
-    else:
-        require(not baseline_sha256, 'Baseline ID and digest must be supplied together')
-        finished = validate_report(accepted, time.time())
-    current = inspect_persistence(accepted)
-    if baseline_id:
-        persistence_baseline.validate_current(renewed, current)
-    counters = accepted['resources']['baseline_counters']
+class HistoryGap(RuntimeError):
+    pass
+
+
+def resource_history(finished, counters):
     with closing(readonly(DATA/'finevent.db')) as conn:
-        history = conn.execute('SELECT at,available,oom_kills FROM resources WHERE at>=? ORDER BY at', (int(finished),))
-        count = 0
+        # The database samples less often than the observer. Include its last overlapping
+        # sample so a just-completed observation need not wait for the next database write.
+        history = conn.execute(
+            'SELECT at,available,oom_kills FROM resources WHERE at >= COALESCE('
+            '(SELECT MAX(at) FROM resources WHERE at BETWEEN ? AND ?), ?) ORDER BY at',
+            (finished-180, int(finished), int(finished)))
         previous_at = finished
         minimum = None
+        count = 0
+        gap = False
         for at, available, oom_kills in history:
-            require(at-previous_at <= 180 and available >= 64*MIB and oom_kills == counters['finevent_oom_kill'],
-                    'Post-persistence memory history is incomplete or shows pressure')
+            require(available >= 64*MIB and oom_kills == counters['finevent_oom_kill'],
+                    'Post-persistence memory history shows pressure or changed OOM counters')
+            if at-previous_at > 180:
+                gap = True
             previous_at = at
             minimum = available if minimum is None else min(minimum, available)
             count += 1
-        require(count and time.time()-previous_at <= 180, 'Post-persistence memory history is incomplete or shows pressure')
+        if gap or not count or time.time()-previous_at > 180:
+            raise HistoryGap('Post-persistence memory history is incomplete')
+        require(previous_at <= time.time(), 'Post-persistence memory history contains future samples')
+        return count, minimum/MIB
+
+
+def preflight(directory, baseline_id=None, baseline_sha256=None, operation=None):
+    import persistence_baseline as baselines
+    evidence = BACKUPS/PERSIST_ID
+    accepted = json.loads((evidence/'report.json').read_text())
+    current = inspect_persistence(accepted)
+    counters = accepted['resources']['baseline_counters']
+    receipt = None
+    require(bool(baseline_id) == bool(baseline_sha256), 'Baseline ID and digest must be supplied together')
+    if operation is not None and not baseline_id:
+        current, receipt, (count, minimum) = baselines.for_deployment(directory, operation, accepted, current)
+    else:
+        if baseline_id:
+            renewed = baselines.load(baseline_id, baseline_sha256)
+            baselines.validate_current(renewed, current)
+            finished = datetime.fromisoformat(renewed['observation_ended']).timestamp()
+            receipt = {'id': baseline_id, 'report_sha256': baseline_sha256}
+        else:
+            finished = validate_report(accepted, time.time())
+        count, minimum = resource_history(finished, counters)
     backup = directory/'before.db'
     checksum = snapshot(DATA/'finevent.db', backup)
     return {'status': 'passed', 'persistence_id': PERSIST_ID, 'report_sha256': recovery.sha(evidence/'report.json'),
-            **current, 'renewed_baseline': {'id': baseline_id, 'report_sha256': baseline_sha256} if baseline_id else None,
-            'history_samples': count, 'history_available_min_mib': minimum/MIB,
+            **current, 'renewed_baseline': receipt,
+            'history_samples': count, 'history_available_min_mib': minimum,
             'database_snapshot_sha256': checksum}
 
 
@@ -640,10 +664,12 @@ def rollback_current(directory, report):
 
 
 def observe(directory, report, current):
+    import persistence_baseline as baselines
     pid = service_pid()
     identities = recovery.process_identity(current['pid']), recovery.process_identity(pid)
     baseline = sample(current, pid)
     check_sample(baseline, observation_baseline(report))
+    window = baselines.release_window(report, current, pid, identities)
     first = report['initial_calendar']
     started = int(time.time())
     end = started+OBSERVATION_SECONDS
@@ -666,6 +692,7 @@ def observe(directory, report, current):
                 stream.flush()
                 last_export = time.time()
             time.sleep(5)
+    ended = stamp()
     report['resources'] = resource_summary(samples, baseline)
     final = calendar_state()
     report['calendar'] = calendar_results(first, final)
@@ -679,6 +706,7 @@ def observe(directory, report, current):
     # Source failures are a degraded-data result, not grounds to remove the usable calendar.
     # Human desktop/mobile acceptance remains separate, even when all machine checks pass.
     report['user_acceptance'] = 'pending'
+    baselines.save_release_window(directory, report, window, samples, ended)
 
 
 def resource_summary(samples, baseline):
@@ -706,6 +734,7 @@ def verify_installed(directory, report, backup, transition):
         report['reminder_migration'] = verify_reminder_migration(
             reminder_state(old_db), report['initial_calendar']['reminders'])
     if report.get('verification_profile') == 'ai':
+        import ai_release
         ai_release.prepare(directory, report, current, backup)
     elif report.get('verification_profile') == 'news':
         import news_release
@@ -743,10 +772,11 @@ def run(directory, report):
                 report['previous_review'] = review_previous(report['after_review'])
             if report.get('recover_preflight'):
                 report['recovery'] = review_failed_preflight(report['recover_preflight'], report['failed_report_sha256'], report['after_review'])
-            report['preflight'] = preflight(directory, report.get('baseline_id'), report.get('baseline_sha256'))
+            report['preflight'] = preflight(directory, report.get('baseline_id'), report.get('baseline_sha256'), report)
             if report.get('verification_profile') == 'ai':
                 import ai_release
                 ai_release.preflight()
+            report.pop('planned_end', None)
             report['stage'] = 'install'
             recovery.save(directory/'report.json', report)
             def checkpoint(backup):
@@ -846,7 +876,7 @@ def main():
                 recovery.save(directory/'report.json', report)
                 raise
         recovery.command('systemd-run', '--unit='+report['unit'], '--property=Type=exec', '--property=MemoryMax=64M',
-                         '--property=MemorySwapMax=0', '--property=Nice=10', '--property=RuntimeMaxSec=24000',
+                         '--property=MemorySwapMax=0', '--property=Nice=10', '--property=RuntimeMaxSec=28200',
                          '/usr/bin/python3', '-B', str(Path(__file__).resolve()), '--run-id', args.run_id, '--run')
         print('Background release/verification launched. Evidence: '+str(directory), flush=True)
     elif args.status:

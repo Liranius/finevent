@@ -37,6 +37,9 @@ class WebReleaseTests(unittest.TestCase):
             backend_id = 'calendar-release-20261101T000000Z-11111111'
             (root/backend_id).mkdir()
             control.save(root/backend_id/'report.json', {'status': 'observing', 'created_at': '2026-11-01T00:00:00Z'})
+            evidence_path = root/backend_id/'next-baseline.json'
+            evidence_path.write_bytes(b'private server baseline')
+            backend_report = (root/backend_id/'report.json').read_bytes()
             self.archive = root/'web.tar.gz'
             bundles.ReleaseBundleTests.write(self, bundles.web_fixture())
             data = self.archive.read_bytes()
@@ -58,6 +61,8 @@ class WebReleaseTests(unittest.TestCase):
             self.assertEqual((web/'current/index.html').read_bytes(), b'old')
             self.assertEqual(c.status('latest-web')['id'], second)
             self.assertEqual(c.latest(), backend_id)
+            self.assertEqual(evidence_path.read_bytes(), b'private server baseline')
+            self.assertEqual((root/backend_id/'report.json').read_bytes(), backend_report)
             self.assertEqual(previous.readlink(), app/'releases'/'server-a')
             self.assertTrue((web/'assets/main-hash.js').is_file())
             def fail_new(_host, path):
