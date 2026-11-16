@@ -10,7 +10,7 @@ if (-not $sshTarget.StartsWith('root@')) { throw 'Use the existing administrativ
 $root = Split-Path -Parent $PSScriptRoot
 $stage = Join-Path $root ('.validation/acceptance-tools/' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stage | Out-Null
-foreach ($name in @('resume_calendar_acceptance.py','calendar_release.py','calendar_review.py','install.py','web_release.py','memory_recovery.py','memory_diagnostic.py')) {
+foreach ($name in @('resume_calendar_acceptance.py','calendar_release.py','persistence_baseline.py','calendar_review.py','trend_settings.py','install.py','web_release.py','memory_recovery.py','memory_diagnostic.py')) {
     Export-FineventDeploymentFile (Join-Path "$root/deploy" $name) (Join-Path $stage $name)
 }
 Copy-Item -LiteralPath (Join-Path $root 'deploy/calendar-reviews.json') -Destination $stage

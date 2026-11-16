@@ -240,13 +240,16 @@ def checks_passed(report):
 
 
 def observe(directory, report, current):
+    import persistence_baseline as baselines
     pid = calendar.service_pid()
     identities = recovery.process_identity(current['pid']), recovery.process_identity(pid)
     baseline = calendar.sample(current, pid)
     calendar.check_sample(baseline, report['preflight']['baseline'])
-    started = int(time.time())
+    window = baselines.release_window(report, current, pid, identities)
+    start = calendar.stamp()
+    started = datetime.fromisoformat(start).timestamp()
     end = started+OBSERVATION_SECONDS
-    report.update(status='observing', stage='news_and_resources', observation_started=calendar.stamp(),
+    report.update(status='observing', stage='news_and_resources', observation_started=start,
                   planned_end=datetime.fromtimestamp(end, calendar.ZONE).isoformat(), news_api_samples=0,
                   calendar_verification='Existing calendar/reminders preserved; next six-hour synchronization is not retested.')
     samples, last_probe = [], 0
@@ -276,6 +279,7 @@ def observe(directory, report, current):
                 recovery.save(directory/'report.json', report)
                 stream.flush()
             time.sleep(5)
+    ended = calendar.stamp()
     report['news_api'] = probe_api()
     report['news_index'] = state(report['news_api']['rule_version'])
     if report.get('calendar_links_required'):
@@ -298,3 +302,4 @@ def observe(directory, report, current):
                                 'two_trading_days_retested': False, 'ai_load_tested': False}
     good = calendar.runtime_passed(report) and checks_passed(report)
     report.update(status='completed_for_review' if good else 'needs_review', stage='completed', finished_at=calendar.stamp())
+    baselines.save_release_window(directory, report, window, samples, ended)

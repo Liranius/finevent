@@ -378,4 +378,15 @@ def observe(directory, report, current):
                                'automatic_enabled': False, 'human_content_review': 'pending',
                                'full_month_load_tested': False, 'calendar_cycle_retested': False}
     good = checks_passed(report) and calendar.runtime_passed(report)
+    if good:
+        # The AI preservation check performs its final restart after the paid call.
+        # Earlier samples belong to the old process. Observe the installed process read-only.
+        import persistence_baseline as baselines
+        report['stage'] = 'ai_post_restart_baseline'
+        try:
+            window, _ = baselines.observe_for_operation(directory, report, 'post_restart_baseline', 'Final AI verification restart')
+        except baselines.InsufficientWindow as error:
+            report['baseline_unavailable'] = str(error)
+        else:
+            baselines.publish(directory, report, window)
     report.update(status='completed_for_review' if good else 'needs_review', stage='completed', finished_at=calendar.stamp())
