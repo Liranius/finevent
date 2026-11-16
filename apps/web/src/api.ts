@@ -86,11 +86,11 @@ export async function api<T>(path: string, method = 'GET', data?: unknown): Prom
   const options: RequestInit = {
     method,
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': data instanceof Blob ? 'text/calendar' : 'application/json' },
     signal: AbortSignal.timeout(15000),
   };
   if (data !== undefined && method !== 'GET' && method !== 'HEAD')
-    options.body = JSON.stringify(data);
+    options.body = data instanceof Blob ? data : JSON.stringify(data);
   const response = await fetch(`/finevent/api/v1/${path}`, options);
   const body = (await response.json()) as T & { error?: string };
   if (!response.ok) throw new ApiError(body.error ?? '请求失败，请稍后重试', response.status);

@@ -22,6 +22,8 @@ describe('calendar time semantics', () => {
       eventOrigin({ ...blankEvent(), source: 'nyfed', provenance: { mode: 'supplement' } }),
     ).toBe('纽约联储 · 补充来源');
     expect(eventOrigin({ ...blankEvent(), source: 'nbs' })).toBe('国家统计局');
+    expect(eventOrigin({ ...blankEvent(), source: 'census' })).toBe('美国人口普查局');
+    expect(eventOrigin({ ...blankEvent(), source: 'dol' })).toBe('美国劳工部');
   });
   it('keeps a year and Beijing timezone in snapshot review evidence', () => {
     expect(reviewedTime(Date.parse('2026-10-30T13:00:00Z') / 1000)).toBe('2026/10/30 21:00');

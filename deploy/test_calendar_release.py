@@ -65,6 +65,18 @@ class CalendarReleaseTests(unittest.TestCase):
         self.assertEqual(accepted['status'], 'accepted_with_source_limits')
         self.assertFalse(result['nbs']['healthy'])
         self.assertFalse(result['bls']['healthy'])
+        bls_only = {**final, 'snapshots': [{'source': 'bls', 'active_entries': 142, 'metadata': {'format': 'release-table'}}]}
+        limits = release.source_acceptance(result, bls_only, '2026-10-31')['limitations']
+        self.assertTrue(any('BLS annual schedule' in limit for limit in limits))
+        self.assertFalse(any('NBS snapshot' in limit for limit in limits))
+        uploaded = {**final, 'snapshots': [{'source': 'bls', 'active_entries': 1, 'metadata': {'format': 'ics'}}]}
+        limits = release.source_acceptance(result, uploaded, '2026-10-31')['limitations']
+        self.assertTrue(any('manually imported ICS' in limit for limit in limits))
+        self.assertFalse(any('BLS annual schedule' in limit for limit in limits))
+        for source in ('census', 'dol'):
+            with self.subTest(source=source):
+                failed = release.calendar_results(first, state(121601, failed=source))
+                self.assertEqual(release.source_acceptance(failed, final, '2026-10-31')['status'], 'needs_review')
         for kind in ('checksum', 'review', 'empty', 'expired', 'supplement_failed', 'not_due'):
             changed, results, today = deepcopy(final), deepcopy(result), '2026-10-31'
             if kind == 'checksum': changed['snapshots'][0]['body_sha256'] = 'tampered'
@@ -86,6 +98,15 @@ class CalendarReleaseTests(unittest.TestCase):
                   'trendradar': {'status': 'passed'}, 'health': evidence()['health'],
                   'calendar': release.calendar_results(state(), state(121601, failed='bls'))}
         release.validate_previous(report, run_id, 'current')
+        previous = deepcopy(report)
+        for source in ('census', 'dol'):
+            previous['calendar'].pop(source)
+        release.validate_previous(previous, run_id, 'current')
+        for source in ('census', 'dol'):
+            partial = deepcopy(report)
+            partial['calendar'].pop(source)
+            with self.subTest(missing=source), self.assertRaises(RuntimeError):
+                release.validate_previous(partial, run_id, 'current')
         for kind in ('unfinished', 'short', 'rollback', 'memory', 'oom', 'trend', 'https', 'source', 'supplement', 'different_release'):
             changed = deepcopy(report)
             if kind == 'unfinished': changed['stage'] = 'scheduled_sync_and_resources'

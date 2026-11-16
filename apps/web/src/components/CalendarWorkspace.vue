@@ -24,6 +24,7 @@ import {
   type FundDraft,
 } from '../calendar';
 import { linkedOrigin, returnToList, type CalendarNavigation } from '../workspace-navigation';
+import BLSCalendarImport from './BLSCalendarImport.vue';
 import CalendarLinks from './CalendarLinks.vue';
 import EventEditor from './EventEditor.vue';
 import EventReminder from './EventReminder.vue';
@@ -58,7 +59,11 @@ const data = ref<CalendarData | null>(null);
 const snapshotCount = computed(() =>
   (data.value?.sources ?? []).reduce(
     (total, source) =>
-      total + (source.snapshots ?? []).reduce((sum, snapshot) => sum + snapshot.active_entries, 0),
+      total +
+      (source.snapshots ?? []).reduce(
+        (sum, snapshot) => sum + (snapshot.format === 'ics' ? 0 : snapshot.active_entries),
+        0,
+      ),
     0,
   ),
 );
@@ -516,6 +521,7 @@ onUnmounted(() => {
       <p v-if="!data" class="empty">
         官方来源暂未加载。<button :disabled="busy" @click="action(refresh)">重试</button>
       </p>
+      <BLSCalendarImport v-if="data" @imported="action(refresh)" @expired="emit('expired')" />
       <details v-if="data" class="source-details">
         <summary>
           官方来源 ·
@@ -549,13 +555,34 @@ onUnmounted(() => {
               :key="snapshot.id"
               class="snapshot-record"
             >
-              <strong>官方快照 · {{ snapshot.active_entries }} 项尚未由主源更新</strong>
-              <p class="caption">
-                核对 {{ reviewedTime(snapshot.reviewed_at) }} · 北京时间 · 日程至
-                {{ snapshot.coverage_end }}
-              </p>
-              <p class="caption">快照导入不代表主源同步成功，也不能保证已包含后续改期。</p>
-              <a :href="`/finevent/api/v1/calendar-snapshots/${snapshot.id}`">下载核对时原文</a>
+              <template v-if="snapshot.format === 'ics'">
+                <strong>手动导入 ICS · {{ snapshot.active_entries }} 项</strong>
+                <p class="caption">导入于 {{ reviewedTime(snapshot.imported_at) }} · 北京时间</p>
+                <a :href="`/finevent/api/v1/calendar-snapshots/${snapshot.id}`">下载已导入的 ICS</a>
+              </template>
+              <template v-else>
+                <strong v-if="snapshot.format === 'release-table'">
+                  {{ snapshot.year }} 年
+                  {{ snapshot.url.startsWith('https://www.dol.gov/') ? '劳工部公告' : 'BLS 年表' }}
+                  · {{ snapshot.active_entries }} 项
+                </strong>
+                <strong v-else>官方快照 · {{ snapshot.active_entries }} 项尚未由主源更新</strong>
+                <p class="caption">
+                  核对 {{ reviewedTime(snapshot.reviewed_at) }} · 北京时间 · 日程至
+                  {{ snapshot.coverage_end }}
+                </p>
+                <p class="caption">快照导入不代表主源同步成功，也不能保证已包含后续改期。</p>
+                <a :href="`/finevent/api/v1/calendar-snapshots/${snapshot.id}`">{{
+                  snapshot.format === 'release-table' ? '下载核对时日程摘录' : '下载核对时原文'
+                }}</a>
+                <a
+                  v-if="snapshot.format === 'release-table'"
+                  :href="snapshot.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  >查看官方发布页 ↗</a
+                >
+              </template>
             </div>
           </li>
         </ul>
@@ -684,17 +711,41 @@ onUnmounted(() => {
         </section>
         <aside class="evidence-panel">
           <h2>来源与依据</h2>
-          <div v-if="detail.event.provenance?.mode === 'snapshot'" class="snapshot-record">
-            <strong>官方原文快照</strong>
+          <div v-if="detail.event.provenance?.mode === 'upload'" class="snapshot-record">
+            <strong>手动导入的 ICS</strong>
             <p class="caption">
-              原文采集 {{ reviewedTime(detail.event.provenance.retrieved_at) }} · 北京时间
+              导入于 {{ reviewedTime(detail.event.provenance.reviewed_at) }} · 北京时间
+            </p>
+            <a :href="`/finevent/api/v1/calendar-snapshots/${detail.event.provenance.snapshot_id}`"
+              >下载已导入的 ICS</a
+            >
+          </div>
+          <div v-else-if="detail.event.provenance?.mode === 'snapshot'" class="snapshot-record">
+            <strong>{{
+              detail.event.provenance.format === 'release-table' ? '官方日程摘录' : '官方原文快照'
+            }}</strong>
+            <p class="caption">
+              {{ detail.event.provenance.format === 'release-table' ? '日程采集' : '原文采集' }}
+              {{ reviewedTime(detail.event.provenance.retrieved_at) }} · 北京时间
             </p>
             <p class="caption">
               核对 {{ reviewedTime(detail.event.provenance.reviewed_at) }} · 北京时间
             </p>
             <p class="warning">此后改期尚未自动核对，请以官方最新公告为准。</p>
-            <a :href="`/finevent/api/v1/calendar-snapshots/${detail.event.provenance.snapshot_id}`"
-              >下载核对时原文</a
+            <a
+              :href="`/finevent/api/v1/calendar-snapshots/${detail.event.provenance.snapshot_id}`"
+              >{{
+                detail.event.provenance.format === 'release-table'
+                  ? '下载核对时日程摘录'
+                  : '下载核对时原文'
+              }}</a
+            >
+            <a
+              v-if="detail.event.provenance.authority_url"
+              :href="detail.event.provenance.authority_url"
+              target="_blank"
+              rel="noopener noreferrer"
+              >核对劳工部公告 ↗</a
             >
           </div>
           <div v-else-if="detail.event.provenance?.mode === 'supplement'" class="snapshot-record">
@@ -707,7 +758,9 @@ onUnmounted(() => {
               >查看 BLS 指标页面 ↗</a
             >
           </div>
-          <a :href="detail.event.url" target="_blank" rel="noopener noreferrer">查看原文 ↗</a>
+          <a :href="detail.event.url" target="_blank" rel="noopener noreferrer">{{
+            detail.event.provenance?.mode === 'upload' ? 'BLS 官方日历 ↗' : '查看原文 ↗'
+          }}</a>
           <p class="original-text">{{ detail.event.evidence }}</p>
         </aside>
       </div>
@@ -727,6 +780,11 @@ onUnmounted(() => {
             <p>{{ eventTime(revision.event) }}</p>
             <p class="caption">记录于 {{ formatTime(revision.saved_at) }}</p>
             <p class="caption">{{ eventOrigin(revision.event) }}</p>
+            <a
+              v-if="revision.event.provenance?.mode === 'upload'"
+              :href="`/finevent/api/v1/calendar-snapshots/${revision.event.provenance.snapshot_id}`"
+              >下载此版本的 ICS</a
+            >
             <p class="original-text">{{ revision.event.conditions }}</p>
           </li>
         </ol>

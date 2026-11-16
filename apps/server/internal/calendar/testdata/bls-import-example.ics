@@ -1,0 +1,11 @@
+BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//Finevent//Local calendar import example//EN
+BEGIN:VEVENT
+UID:finevent-example-2026-11-employment
+DTSTAMP:20261116T000000Z
+DTSTART;TZID=America/New_York:20261204T083000
+SUMMARY:Employment Situation for November 2026
+DESCRIPTION:Finevent local preview example. The scheduled time is unchanged.
+END:VEVENT
+END:VCALENDAR

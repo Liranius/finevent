@@ -3,8 +3,10 @@ package probe
 import (
 	"database/sql"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"finevent/internal/calendar"
 )
@@ -20,6 +22,26 @@ func (a *App) calendarRoutes(m *http.ServeMux) {
 			a.internal(w, err)
 		}
 	}
+	m.HandleFunc("POST "+prefix+"calendar-imports/bls", func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, calendar.MaxICSBytes))
+		if err != nil {
+			var limit *http.MaxBytesError
+			if errors.As(err, &limit) {
+				fail(w, http.StatusRequestEntityTooLarge, "ICS 文件超过 2 MiB")
+			} else {
+				fail(w, 400, "无法读取 ICS 文件")
+			}
+			return
+		}
+		result, err := s.ImportBLSFile(body, r.URL.Query().Get("confirm"), time.Now().Unix())
+		if errors.Is(err, calendar.ErrInvalidICS) {
+			fail(w, 400, err.Error())
+		} else if err != nil {
+			respondError(w, err)
+		} else {
+			writeJSON(w, 200, result)
+		}
+	})
 	m.HandleFunc("GET "+prefix+"calendar-snapshots/{id}", func(w http.ResponseWriter, r *http.Request) {
 		body, err := s.SnapshotBody(r.PathValue("id"))
 		if err != nil {
@@ -28,6 +50,9 @@ func (a *App) calendarRoutes(m *http.ServeMux) {
 		}
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Content-Disposition", `attachment; filename="official-calendar-snapshot.txt"`)
+		if strings.HasPrefix(r.PathValue("id"), "bls-upload-") {
+			w.Header().Set("Content-Disposition", `attachment; filename="imported-bls.ics"`)
+		}
 		_, _ = w.Write(body)
 	})
 	m.HandleFunc("GET "+prefix+"calendar", func(w http.ResponseWriter, r *http.Request) {

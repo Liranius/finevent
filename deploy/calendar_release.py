@@ -43,10 +43,11 @@ PATCH = Path('/srv/example/finevent-host/trendradar/client.py')
 PARENT = Path('/sys/fs/cgroup/trendradar.slice')
 LOCK = Path('/run/lock/finevent-memory-recovery.lock')
 ID_PATTERN = re.compile(r'calendar-release-\d{8}T\d{6}Z-[a-f0-9]{8}')
-SOURCE_IDS = {'nbs', 'fomc', 'bls', 'bea', 'nyfed'}
+REQUIRED_HEALTHY_SOURCES = {'fomc', 'bea', 'nyfed', 'census', 'dol'}
+SOURCE_IDS = REQUIRED_HEALTHY_SOURCES | {'nbs', 'bls'}
 OBSERVATION_SECONDS = 6*3600+15*60
-# NBS index/two annual pages, FOMC/BLS/BEA and NYFed current/next month: eight bounded requests.
-INITIAL_SYNC_SECONDS = 10*60
+# Allow ten serial one-minute requests plus time for parsing and importing.
+INITIAL_SYNC_SECONDS = 12*60
 ZONE = ZoneInfo('Asia/Shanghai')
 
 def require(condition, message):
@@ -299,13 +300,17 @@ def source_acceptance(results, final, today):
                    for s in snapshots)
     healthy = lambda key: results[key]['healthy'] and results[key]['synced_again']
     good = (set(results) == SOURCE_IDS and all(r['synced_again'] for r in results.values())
-            and all(healthy(k) for k in ('fomc', 'bea', 'nyfed'))
+            and all(healthy(k) for k in REQUIRED_HEALTHY_SOURCES)
             and (healthy('nbs') or reviewed))
     limits = ['NYFed covers selected BLS events in current/next published month, not the complete BLS calendar.']
     if not results['bls']['healthy']:
         limits.append('BLS primary synchronization remains unavailable; its error is retained.')
-    if any(s['active_entries'] for s in snapshots):
+    if any(s['source'] == 'nbs' and s['active_entries'] for s in snapshots):
         limits.append('Reviewed NBS snapshot entries may miss subsequent rescheduling; original and review time are retained.')
+    if any(s['source'] == 'bls' and s['active_entries'] and s['metadata'].get('format') == 'release-table' for s in snapshots):
+        limits.append('BLS annual schedule extracts retain the reviewed dates; later changes require confirmation.')
+    if any(s['source'] == 'bls' and s['active_entries'] and s['metadata'].get('format') == 'ics' for s in snapshots):
+        limits.append('Some BLS entries use a manually imported ICS file.')
     return {'status': 'accepted_with_source_limits' if good else 'needs_review',
             'nbs_snapshot_available': reviewed, 'snapshots': snapshots, 'limitations': limits}
 
@@ -354,8 +359,9 @@ def validate_previous(report, run_id, active_release, trend_review=None):
     require(finished-started >= OBSERVATION_SECONDS-1, 'Previous calendar observation has not completed')
     results = report.get('calendar', {})
     require({'nbs', 'bls', 'fomc', 'bea'} <= set(results)
+            and (not {'census', 'dol'}.intersection(results) or SOURCE_IDS <= set(results))
             and all(r.get('synced_again') for r in results.values())
-            and all(results[k].get('healthy') for k in ({'fomc', 'bea', 'nyfed'} & set(results))),
+            and all(results[k].get('healthy') for k in REQUIRED_HEALTHY_SOURCES.intersection(results)),
             'Previous operation has issues beyond the reviewed source limitations')
 
 
@@ -510,7 +516,7 @@ def wait_initial_sources(directory, report, current):
             recovery.save(directory/'report.json', report)
             return state
         time.sleep(5)
-    raise RuntimeError('Initial calendar synchronization did not finish within ten minutes')
+    raise RuntimeError('Initial calendar synchronization did not finish within twelve minutes')
 
 
 def check_sample(row, baseline):

@@ -15,6 +15,7 @@ import (
 
 type Provenance struct {
 	Mode         string `json:"mode"`
+	Format       string `json:"format,omitempty"`
 	SnapshotID   string `json:"snapshot_id,omitempty"`
 	RetrievedAt  int64  `json:"retrieved_at,omitempty"`
 	ReviewedAt   int64  `json:"reviewed_at,omitempty"`
@@ -23,6 +24,7 @@ type Provenance struct {
 }
 
 type SnapshotInfo struct {
+	Format          string `json:"format,omitempty"`
 	ID              string `json:"id"`
 	URL             string `json:"url"`
 	RetrievedAt     int64  `json:"retrieved_at"`
@@ -61,7 +63,11 @@ func (s *Store) ImportBundledSnapshot() error {
 	if err != nil {
 		return err
 	}
-	return s.importSnapshot(info, body, time.Now().Unix())
+	now := time.Now().Unix()
+	if err := s.importSnapshot(info, body, now); err != nil {
+		return err
+	}
+	return s.importBundledBLS(now)
 }
 
 func (s *Store) importSnapshot(info SnapshotInfo, body []byte, now int64) error {

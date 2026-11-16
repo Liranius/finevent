@@ -17,7 +17,8 @@ export interface CalendarEvent {
   version: number;
   updated_at: number;
   provenance?: {
-    mode: 'snapshot' | 'supplement';
+    mode: 'snapshot' | 'supplement' | 'upload';
+    format?: 'release-table' | 'ics';
     snapshot_id?: string;
     retrieved_at?: number;
     reviewed_at?: number;
@@ -38,6 +39,8 @@ export interface CalendarSource {
   note?: string;
   snapshots?: {
     id: string;
+    year: number;
+    format?: 'release-table' | 'ics';
     url: string;
     retrieved_at: number;
     reviewed_at: number;
@@ -78,11 +81,14 @@ export const sourceNames: Record<string, string> = {
   bls: 'BLS',
   bea: 'BEA',
   nyfed: '纽约联储',
+  census: '美国人口普查局',
+  dol: '美国劳工部',
   fund: '基金公告',
   manual: '手工补录',
 };
 export function eventOrigin(event: CalendarEvent): string {
   const name = sourceNames[event.source] ?? event.source;
+  if (event.provenance?.mode === 'upload') return `${name} · 手动导入`;
   if (event.provenance?.mode === 'snapshot') return `${name} · 官方快照`;
   if (event.provenance?.mode === 'supplement') return `${name} · 补充来源`;
   return name;
@@ -115,7 +121,7 @@ export function eventDays(event: CalendarEvent): [string, string] {
     ? [event.start, event.end]
     : [beijingDay(event.start), beijingDay(event.end)];
 }
-export function eventTime(event: CalendarEvent): string {
+export function eventTime(event: Pick<CalendarEvent, 'start' | 'end' | 'precision'>): string {
   if (event.precision === 'date')
     return `${event.start}${event.end !== event.start ? ` 至 ${event.end}` : ''} · 仅日期`;
   const format = (value: string) =>
