@@ -518,7 +518,7 @@ func parseICS(body, rawURL string) ([]Event, error) {
 			if fields["RRULE"] != "" || fields["RECURRENCE-ID"] != "" || fields["RDATE"] != "" || fields["EXDATE"] != "" {
 				return nil, errors.New("BLS 出现重复规则，需核查后再导入")
 			}
-			e := event("bls", fields["UID"], icsText(fields["SUMMARY"]), rawURL, "America/New_York")
+			e := event("bls", fields["UID"], strings.TrimSpace(icsText(fields["SUMMARY"])), rawURL, "America/New_York")
 			if seq, ok := fields["SEQUENCE"]; ok {
 				value, err := strconv.ParseInt(seq, 10, 32)
 				if err != nil || value < 0 {
