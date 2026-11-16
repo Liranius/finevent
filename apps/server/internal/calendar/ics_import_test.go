@@ -22,7 +22,7 @@ func TestBLSFileAndAnnualTableKeepSameReleaseIDs(t *testing.T) {
 		t.Run(first, func(t *testing.T) {
 			s := testStore(t)
 			if first == "annual" {
-				if err := s.importBundledBLS(now); err != nil {
+				if err := s.importBLSTestPackage(t, now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -44,7 +44,7 @@ func TestBLSFileAndAnnualTableKeepSameReleaseIDs(t *testing.T) {
 				}
 			}
 			if first == "ics" {
-				if err := s.importBundledBLS(now); err != nil {
+				if err := s.importBLSTestPackage(t, now); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -57,8 +57,8 @@ func TestBLSFileAndAnnualTableKeepSameReleaseIDs(t *testing.T) {
 				}
 			}
 			var count int
-			if err := s.DB.QueryRow("SELECT count(*) FROM calendar_events").Scan(&count); err != nil || count != 308 {
-				t.Fatalf("got %d events, want 308: %v", count, err)
+			if err := s.DB.QueryRow("SELECT count(*) FROM calendar_events").Scan(&count); err != nil || count != 11 {
+				t.Fatalf("got %d events, want 11: %v", count, err)
 			}
 		})
 	}
@@ -67,7 +67,7 @@ func TestBLSFileAndAnnualTableKeepSameReleaseIDs(t *testing.T) {
 func TestBLSUnqualifiedProductivityRequiresUniqueReleaseTime(t *testing.T) {
 	s := testStore(t)
 	const now = 1800000000
-	if err := s.importBundledBLS(now); err != nil {
+	if err := s.importBLSTestPackage(t, now); err != nil {
 		t.Fatal(err)
 	}
 	file := []byte(blsReleaseICS("unspecified", "Productivity and Costs", "20260108T140000Z"))
@@ -96,7 +96,7 @@ func TestICSUploadReviewCommitAndReplay(t *testing.T) {
 	if err := s.Import("bls", nil, now, errors.New("HTTP 403")); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.importBundledBLS(now); err != nil {
+	if err := s.importBLSTestPackage(t, now); err != nil {
 		t.Fatal(err)
 	}
 	file := fixture(t, "bls-import-example.ics")
@@ -113,8 +113,8 @@ func TestICSUploadReviewCommitAndReplay(t *testing.T) {
 		}
 		return got
 	}
-	// The same instant in UTC and Eastern time is a confirmation, not a reschedule.
-	file = strings.Replace(file, ";TZID=America/New_York:20261204T083000", ":20261204T133000Z", 1)
+	// The test notice moved this release to 09:30 Eastern. Confirm that instant in UTC.
+	file = strings.Replace(file, ";TZID=America/New_York:20261204T083000", ":20261204T143000Z", 1)
 	first := run(file, "")
 	if len(first.Changes) != 1 || first.Changes[0].Action != "update" {
 		t.Fatal(first)
@@ -136,7 +136,7 @@ func TestICSUploadReviewCommitAndReplay(t *testing.T) {
 	if equal := run(variant, ""); len(equal.Changes) != 0 || equal.Unchanged != 1 {
 		t.Fatal(equal)
 	}
-	later := strings.Replace(file, "20261204T133000Z", "20261207T133000Z", 1)
+	later := strings.Replace(file, "20261204T143000Z", "20261207T133000Z", 1)
 	change := run(later, "")
 	if len(change.Changes) != 1 || change.Changes[0].Action != "reschedule" {
 		t.Fatal(change)

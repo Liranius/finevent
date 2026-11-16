@@ -54,9 +54,9 @@ pnpm preview --host 127.0.0.1 --port 4173 --strictPort
 
 同日纽约联储月末修复已在服务器生效，沿实际相邻月份链接取回当月/下月日程，成功导入 11 项，事件总数 85。新观察保留既有统计局直接同步数据，旧快照补入为零；已中断的前序观察不计为通过。
 
-`-collect` 启动时会导入随程序附带的官方日程，独立使用 `-calendar-snapshot` 可离线导入。统计局 2026 年快照仅补缺。BLS 的 2026、2027 年表和经核对的劳工部公告按发布项目和统计期归并，改期沿用原事件、关注与修订记录。
+首次启动创建数据库，`-collect` 直接进行官方来源同步。离线补充日程时，以运行服务的账户执行 `finevent -data <数据目录> -import-calendar-package <已核对的 ZIP>`。命令导入后退出，已有实例也可使用。同一份包可重复导入。
 
-拿到 BLS 的 `.ics` 文件后，在「设置 → 日历官方来源 → 手动导入 BLS 日历」选择文件，核对预览并确认。日历即刻更新，文件未列出的事项保留。主源同步结果和手动导入时间分别展示。只有网页或 PDF 公告时，仍可核对并更新随程序发布的摘录。[快照说明](apps/server/internal/calendar/snapshots/README.md)
+拿到 BLS 的 `.ics` 文件后，在「设置 → 日历官方来源 → 手动导入 BLS 日历」选择文件，核对预览并确认。日历即刻更新，文件未列出的事项保留。主源同步结果和手动导入时间分别展示。只有网页或 PDF 公告时，仍可核对并更新独立数据包中的摘录。[数据包说明](docs/calendar-package.md)
 
 日历保留原始时区，有明确时刻的事件显示北京时间；仅日期的事件保留原始民用日期，不换算成 UTC 零点。基金窗口日期包含结束日，交易日和日内时刻等限制保留在条件中；缩写、相对日期及多份额公告需要人工补全。新日历表以增量方式创建，保留既有新闻、会话和探测账本；事件与修订不参与普通新闻的九十天清理。API 见 [日历接口](docs/calendar-api.md)。
 
@@ -141,7 +141,7 @@ DeepSeek 首次业务发布使用 `scripts/publish-ai.ps1 -Archive <已核验发
 
 该命令本地编译诊断程序，上传后在服务器后台对四个固定官方地址各请求一次，沿用业务请求的 15 秒限制，记录状态码、耗时及正文读取错误类型。BLS 年度网页仅作候选连通性检查。报告位于 `.validation/calendar-source-check-*/report.json`；SSH 断开或下载失败后使用 `.\scripts\inspect-calendar-sources.ps1 -Report` 取回同一报告，不重复请求。该诊断不会修改正在运行的六小时观察结果。
 
-统计局年度页面曾被首次发布的 15 秒期限截断，60 秒独立候选也曾超时，后来原版定时同步又成功。10 月 31 日补充来源版本已部署独立 60 秒日历请求，快讯仍为 15 秒，正文仍限 2 MiB；延长期限不能保证来源可用。`.\scripts\inspect-calendar-sources.ps1 -Candidate` 只读取网络，不安装修复；旧报告保留在各次验证目录，`-Report` 可下载已有报告。显式设置 `FINEVENT_LIVE_CALENDAR=1` 后运行 `go -C apps/server test ./internal/calendar -run TestLiveNYFedSupplement -v` 可将实时纽约联储页面和内置快照导入临时测试库，不改生产数据。
+统计局年度页面曾被首次发布的 15 秒期限截断，60 秒独立候选也曾超时，后来原版定时同步又成功。10 月 31 日补充来源版本已部署独立 60 秒日历请求，快讯仍为 15 秒，正文仍限 2 MiB；延长期限不能保证来源可用。`.\scripts\inspect-calendar-sources.ps1 -Candidate` 只读取网络，不安装修复；旧报告保留在各次验证目录，`-Report` 可下载已有报告。显式设置 `FINEVENT_LIVE_CALENDAR=1` 后运行 `go -C apps/server test ./internal/calendar -run TestLiveNYFedSupplement -v` 可将实时纽约联储页面和测试样本导入临时测试库，不改生产数据。
 
 所有运维入口先读取本地部署配置：
 

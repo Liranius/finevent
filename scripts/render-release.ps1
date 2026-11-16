@@ -19,7 +19,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Generic release extraction failed' }
 $template = Join-Path $stage 'deployment-template.json'
 $null = Initialize-FineventDeployment -ConfigPath $ConfigPath -TemplatePath $template
 foreach ($file in (Get-ChildItem -LiteralPath (Join-Path $stage 'deploy') -File)) {
-    if ($file.Extension -in @('.py','.service','.timer','.conf','.json') -and $file.Name -ne 'calendar-snapshot.json') {
+    if ($file.Extension -in @('.py','.service','.timer','.conf','.json')) {
         Export-FineventDeploymentFile $file.FullName $file.FullName
     }
 }

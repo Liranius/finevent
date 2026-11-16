@@ -39,6 +39,7 @@ $generic = Join-Path $temporary 'generic'
 New-Item -ItemType Directory -Path $generic | Out-Null
 & tar -xzf $Archive -C $generic
 if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect generic release' }
+Assert-Release (-not (Test-Path -LiteralPath (Join-Path $generic 'deploy/calendar-snapshot.json'))) 'Generic release contains reviewed calendar data'
 $genericMetadata = Get-Content -LiteralPath (Join-Path $generic 'release.json') -Raw | ConvertFrom-Json
 Assert-Release ($metadata.source_commit -eq $genericMetadata.source_commit) 'Rendering changed the source commit'
 Assert-Release ($metadata.component -eq 'server' -and -not (Test-Path -LiteralPath (Join-Path $generic 'dist'))) 'Server release contains web assets or lacks a component identity'
@@ -46,7 +47,7 @@ Assert-Release ((Get-FileHash (Join-Path $generic 'finevent')).Hash -eq (Get-Fil
 $null = Initialize-FineventDeployment -ConfigPath $config
 foreach ($file in (Get-ChildItem -LiteralPath (Join-Path $generic 'deploy') -File)) {
     $original = [IO.File]::ReadAllText($file.FullName)
-    $expected = if ($file.Name -eq 'calendar-snapshot.json') { $original } else { ConvertTo-FineventDeploymentText $original }
+    $expected = ConvertTo-FineventDeploymentText $original
     Assert-Release ([IO.File]::ReadAllText((Join-Path $unpacked "deploy/$($file.Name)")) -ceq $expected) "Rendered deployment file differs: $($file.Name)"
     Assert-Release (-not $original.Contains('release-test.invalid') -and -not $original.Contains('/release-test/')) 'Private rendering contaminated generic content'
 }

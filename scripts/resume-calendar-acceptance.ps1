@@ -14,7 +14,6 @@ foreach ($name in @('resume_calendar_acceptance.py','calendar_release.py','calen
     Export-FineventDeploymentFile (Join-Path "$root/deploy" $name) (Join-Path $stage $name)
 }
 Copy-Item -LiteralPath (Join-Path $root 'deploy/calendar-reviews.json') -Destination $stage
-Copy-Item -LiteralPath (Join-Path $root 'apps/server/internal/calendar/snapshots/nbs-2026.json') -Destination (Join-Path $stage 'calendar-snapshot.json')
 $archive = "$stage.tar.gz"
 & tar -czf $archive -C $stage .
 if ($LASTEXITCODE -ne 0) { throw 'Could not prepare acceptance tools' }

@@ -26,7 +26,7 @@ func TestLiveNYFedSupplement(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := testStore(t)
-	if err = s.ImportBundledSnapshot(); err != nil {
+	if err = s.ImportCalendarPackage(os.DirFS("testdata"), time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	if err = s.Import("nyfed", events, time.Now().Unix(), nil); err != nil {
@@ -43,36 +43,26 @@ func TestLiveNYFedSupplement(t *testing.T) {
 	}
 }
 
-func TestReviewedSnapshotMatchesOfficialFixtureAndSurvivesRestart(t *testing.T) {
-	info, body, err := bundledSnapshot()
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestReviewedSnapshotRetainsEvidenceAcrossRestart(t *testing.T) {
+	info, body := testNBSSnapshot(t)
 	actual, err := Parse("nbs", info.URL, string(body), 2026)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected, err := Parse("nbs", info.URL, fixture(t, "nbs.html"), 2026)
-	if err != nil || len(actual) != 47 || len(expected) != 47 {
-		t.Fatal(len(actual), len(expected), err)
-	}
-	for i, e := range actual {
-		v := expected[i]
-		if e.SourceID != v.SourceID || e.Start != v.Start || e.End != v.End || e.Precision != v.Precision {
-			t.Fatal("snapshot differs from reviewed dates", e, v)
-		}
+	if len(actual) != info.Entries || len(actual) != 47 {
+		t.Fatal(len(actual), info.Entries)
 	}
 	s := testStore(t)
 	if err = s.Import("nbs", nil, info.ReviewedAt, errors.New("source timeout")); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.importSnapshot(info, body, info.ReviewedAt+1); err != nil {
+	if err = importTestNBS(s, info, body, info.ReviewedAt+1); err != nil {
 		t.Fatal(err)
 	}
 	if err = Init(s.DB); err != nil {
 		t.Fatal(err)
 	}
-	if err = s.importSnapshot(info, body, info.ReviewedAt+2); err != nil {
+	if err = importTestNBS(s, info, body, info.ReviewedAt+2); err != nil {
 		t.Fatal(err)
 	}
 	sources, err := s.Sources()
@@ -95,7 +85,7 @@ func TestReviewedSnapshotMatchesOfficialFixtureAndSurvivesRestart(t *testing.T) 
 }
 
 func TestSnapshotNeverOverwritesExistingOrNewerLiveData(t *testing.T) {
-	info, body, _ := bundledSnapshot()
+	info, body := testNBSSnapshot(t)
 	events, _ := Parse("nbs", info.URL, string(body), 2026)
 	for _, newer := range []bool{false, true} {
 		s := testStore(t)
@@ -108,7 +98,7 @@ func TestSnapshotNeverOverwritesExistingOrNewerLiveData(t *testing.T) {
 		if err := s.Import("nbs", []Event{live}, at, nil); err != nil {
 			t.Fatal(err)
 		}
-		if err := s.importSnapshot(info, body, info.ReviewedAt+2); err != nil {
+		if err := importTestNBS(s, info, body, info.ReviewedAt+2); err != nil {
 			t.Fatal(err)
 		}
 		got, _ := s.Get(Key("nbs:" + live.SourceID))
@@ -124,9 +114,9 @@ func TestSnapshotNeverOverwritesExistingOrNewerLiveData(t *testing.T) {
 }
 
 func TestSnapshotChecksumFailureIsAtomicAndLiveImportSupersedesSnapshot(t *testing.T) {
-	info, body, _ := bundledSnapshot()
+	info, body := testNBSSnapshot(t)
 	s := testStore(t)
-	if err := s.importSnapshot(info, append(body, 'x'), info.ReviewedAt+1); err == nil {
+	if err := importTestNBS(s, info, append(body, 'x'), info.ReviewedAt+1); err == nil {
 		t.Fatal("invalid checksum accepted")
 	}
 	var count int
@@ -134,14 +124,14 @@ func TestSnapshotChecksumFailureIsAtomicAndLiveImportSupersedesSnapshot(t *testi
 	if count != 0 {
 		t.Fatal(count)
 	}
-	if err := s.importSnapshot(info, body, info.ReviewedAt+1); err != nil {
+	if err := importTestNBS(s, info, body, info.ReviewedAt+1); err != nil {
 		t.Fatal(err)
 	}
 	events, _ := Parse("nbs", info.URL, string(body), 2026)
 	if err := s.Import("nbs", events, info.ReviewedAt+2, nil); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.importSnapshot(info, body, info.ReviewedAt+3); err != nil {
+	if err := importTestNBS(s, info, body, info.ReviewedAt+3); err != nil {
 		t.Fatal(err)
 	}
 	got, _ := s.Get(Key("nbs:" + events[0].SourceID))

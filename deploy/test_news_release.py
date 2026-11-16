@@ -180,7 +180,7 @@ class NewsReleaseTests(unittest.TestCase):
             stack.enter_context(patch.object(calendar, 'ROOT', directory))
             for name, value in {'preflight': {'container': {}}, 'snapshot': 'sha', 'target': {}, 'parent_metrics': {},
                                 'validate_target': None, 'wait_initial_sources': {'reminders': {}}, 'readonly': Mock(close=Mock()),
-                                'reminder_state': {}, 'verify_reminder_migration': {'status': 'passed'}}.items():
+                                'verify_calendar_migration': {'status': 'passed'}, 'reminder_state': {}, 'verify_reminder_migration': {'status': 'passed'}}.items():
                 stack.enter_context(patch.object(calendar, name, return_value=value))
             stack.enter_context(patch.object(calendar.installer, 'install', return_value=directory/'backup'))
             stack.enter_context(patch.object(news, 'prepare', side_effect=RuntimeError('news gate failed')))

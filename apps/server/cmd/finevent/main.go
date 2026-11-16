@@ -30,7 +30,7 @@ func main() {
 	contact := flag.String("contact", "", "VAPID contact URI (defaults to origin + /finevent/)")
 	trend := flag.String("trendradar", "", "read-only TrendRadar output directory")
 	collect := flag.Bool("collect", false, "enable source sampling")
-	snapshot := flag.Bool("calendar-snapshot", false, "bootstrap the reviewed official calendar snapshot without enabling network collection")
+	calendarPackage := flag.String("import-calendar-package", "", "import a reviewed calendar ZIP into the data directory and exit")
 	flag.Parse()
 	if *dev && *origin == "" {
 		*origin = "http://" + *listen
@@ -89,10 +89,12 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.DB.Close()
-	if *collect || *snapshot {
-		if err = (&calendar.Store{DB: store.DB}).ImportBundledSnapshot(); err != nil {
-			log.Fatal("官方快照导入失败：", err)
+	if *calendarPackage != "" {
+		if err := (&calendar.Store{DB: store.DB}).ImportCalendarArchive(*calendarPackage); err != nil {
+			log.Fatal("日历数据包导入失败：", err)
 		}
+		fmt.Println("日历数据包已核对并导入。")
+		return
 	}
 	app := probe.NewApp(cfg, store)
 	app.AIConfig, err = probe.LoadAIConfig(*dir)

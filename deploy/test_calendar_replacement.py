@@ -165,6 +165,7 @@ class ReplacementTests(unittest.TestCase):
             directory = Path(temporary)
             (directory/'backup').mkdir()
             sqlite3.connect(directory/'backup/database.db').close()
+            sqlite3.connect(directory/'finevent.db').close()
             initial = {**state(), 'reminders': {'schema': 'present', 'enabled': False, 'watches': 0, 'jobs': 0}}
             def observe(*args):
                 self.assertTrue(locks[0].closed)
@@ -174,7 +175,7 @@ class ReplacementTests(unittest.TestCase):
             def finish(*args):
                 self.assertEqual(len(locks), 2)
                 return {'observation_complete': False}
-            with patch.dict('sys.modules', {'fcntl': fake_lock}), patch.object(release, 'LOCK', directory/'lock'), \
+            with patch.dict('sys.modules', {'fcntl': fake_lock}), patch.object(release, 'DATA', directory), patch.object(release, 'LOCK', directory/'lock'), \
                  patch.object(release, 'prepare_replacement', side_effect=prepare), patch.object(release, 'finish_replacement', side_effect=finish), \
                  patch.object(release, 'preflight', return_value={'container': target()}), \
                  patch.object(release.installer, 'install', return_value=directory/'backup'), \

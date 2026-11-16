@@ -1,7 +1,8 @@
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { mkdir, readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 
 import { startPreview } from '../apps/web/scripts/test-preview.ts';
@@ -27,28 +28,39 @@ export async function startOfflineServer(
     `bin/finevent-test-${projectPort}${process.platform === 'win32' ? '.exe' : ''}`,
   );
   const backend = 'http://127.0.0.1:' + port;
+  const data = `.validation/offline-${randomUUID()}`;
+  await mkdir(data, { recursive: true });
+  const fixture = 'apps/server/internal/calendar/testdata';
+  const archive = join(data, 'example.zip');
+  const manifest: { snapshots: { file: string }[] } = JSON.parse(
+    await readFile(join(fixture, 'manifest.json'), 'utf8'),
+  );
+  const files = ['manifest.json', ...manifest.snapshots.map((snapshot) => snapshot.file)];
+  execFileSync(
+    process.platform === 'win32' ? 'python' : 'python3',
+    ['-m', 'zipfile', '-c', archive, ...files.map((file) => join(fixture, file))],
+    { windowsHide: true },
+  );
   const preview = await startPreview(previewPort, backend, webRoot);
   const publicAddress = preview.httpServer.address();
   if (!publicAddress || typeof publicAddress === 'string') throw new Error('Missing preview port');
   const origin = 'http://127.0.0.1:' + publicAddress.port;
-  const child = spawn(
-    executable,
-    [
-      '-dev',
-      '-origin',
-      origin,
-      '-calendar-snapshot',
-      '-data',
-      `.validation/offline-${randomUUID()}`,
-      '-listen',
-      `127.0.0.1:${port}`,
-    ],
-    {
+  const args = ['-dev', '-origin', origin, '-data', data, '-listen', `127.0.0.1:${port}`];
+  const env = { ...process.env, FINEVENT_TEST_PASSWORD: 'finevent-e2e-password-only' };
+  try {
+    execFileSync(executable, [...args, '-import-calendar-package', archive], {
+      env,
       windowsHide: true,
-      env: { ...process.env, FINEVENT_TEST_PASSWORD: 'finevent-e2e-password-only' },
-      stdio: ['ignore', 'ignore', 'pipe'],
-    },
-  );
+    });
+  } catch (error) {
+    await preview.close();
+    throw error;
+  }
+  const child = spawn(executable, args, {
+    windowsHide: true,
+    env,
+    stdio: ['ignore', 'ignore', 'pipe'],
+  });
   let failure = '';
   child.stderr.on('data', (chunk: Buffer) => {
     failure = (failure + chunk.toString()).slice(-2000);
