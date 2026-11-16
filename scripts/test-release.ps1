@@ -41,11 +41,8 @@ New-Item -ItemType Directory -Path $generic | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'Cannot inspect generic release' }
 $genericMetadata = Get-Content -LiteralPath (Join-Path $generic 'release.json') -Raw | ConvertFrom-Json
 Assert-Release ($metadata.source_commit -eq $genericMetadata.source_commit) 'Rendering changed the source commit'
-Assert-Release (Test-Path -LiteralPath (Join-Path $generic 'dist/.vite/manifest.json') -PathType Leaf) 'Generic release lost the Vite build manifest'
-foreach ($file in (Get-ChildItem -LiteralPath (Join-Path $generic 'dist') -File -Recurse -Force) + (Get-Item -LiteralPath (Join-Path $generic 'finevent'))) {
-    $relative = [IO.Path]::GetRelativePath($generic, $file.FullName)
-    Assert-Release ((Get-FileHash -LiteralPath $file.FullName).Hash -eq (Get-FileHash -LiteralPath (Join-Path $unpacked $relative)).Hash) "Rendering changed application content: $relative"
-}
+Assert-Release ($metadata.component -eq 'server' -and -not (Test-Path -LiteralPath (Join-Path $generic 'dist'))) 'Server release contains web assets or lacks a component identity'
+Assert-Release ((Get-FileHash (Join-Path $generic 'finevent')).Hash -eq (Get-FileHash (Join-Path $unpacked 'finevent')).Hash) 'Rendering changed the server binary'
 $null = Initialize-FineventDeployment -ConfigPath $config
 foreach ($file in (Get-ChildItem -LiteralPath (Join-Path $generic 'deploy') -File)) {
     $original = [IO.File]::ReadAllText($file.FullName)

@@ -37,18 +37,40 @@ def check_archive(filename, kind='deployment'):
     for name, digest in manifest.items():
         if "\\" in name or name not in files or hashlib.sha256(files[name]).hexdigest() != digest:
             raise RuntimeError(f"Invalid Linux manifest entry: {name}")
-    for name in ('finevent', 'dist/index.html', 'deploy/finevent.service', 'deploy/install.py'):
-        if name not in manifest:
-            raise RuntimeError(f'Missing release file: {name}')
     metadata = json.loads(files['release.json'].decode('utf-8-sig')) if 'release.json' in files else None
+    component = metadata.get('component') if metadata else None
+    if component not in (None, 'web', 'server'):
+        raise RuntimeError('Unknown release component')
     if metadata is None:
         if kind != 'deployment':
             raise RuntimeError('Generic release metadata is required')
-    elif (metadata.get('schema') != 1 or metadata.get('kind') != kind
-          or metadata.get('target') != 'linux/amd64'
+    elif (metadata.get('schema') != (2 if component else 1) or metadata.get('kind') != kind
+          or metadata.get('target') != ('static' if component == 'web' else 'linux/amd64')
           or not re.fullmatch(r'[a-f0-9]{40}', metadata.get('source_commit', ''))
           or not isinstance(metadata.get('source_dirty'), bool)):
         raise RuntimeError('Invalid release identity or kind; render generic archives before deployment')
+    if component == 'web':
+        if kind != 'generic' or any(not name.startswith('dist/') and name not in ('sha256.json', 'release.json') for name in files):
+            raise RuntimeError('Static releases may contain only web assets and metadata')
+        for name in ('index.html', 'sw.js', 'precache.json', 'manifest.webmanifest'):
+            if 'dist/'+name not in files:
+                raise RuntimeError('Missing PWA file: '+name)
+        precache = json.loads(files['dist/precache.json'])
+        urls = precache['urls']
+        if not urls or not all(url.startswith('/finevent/') and 'dist/'+url[len('/finevent/'):] in files for url in urls):
+            raise RuntimeError('Precache references missing web resources')
+        check_icons(files)
+        return files
+    if component == 'server' and any(name.startswith('dist/') for name in files):
+        raise RuntimeError('Server archive must not contain web assets')
+    required = ['finevent', 'deploy/finevent.service', 'deploy/install.py']
+    if component == 'server':
+        required.append('deploy/web_release.py')
+    if component is None:
+        required.append('dist/index.html')
+    for name in required:
+        if name not in manifest:
+            raise RuntimeError(f'Missing release file: {name}')
     if kind == 'generic':
         template = json.loads(files['deployment-template.json'].decode('utf-8-sig'))
         if set(template) != {'sshTarget', 'siteHost', 'siteAlias', 'appRoot', 'dataRoot', 'backupRoot', 'trendradarRoot', 'hostStateRoot', 'legacyRoot', 'sshStageRoot', 'nginxSnippet'} or not all(isinstance(value, str) and value for value in template.values()):
@@ -83,17 +105,25 @@ def check_archive(filename, kind='deployment'):
     binary = files["finevent"]
     if binary[:5] != b"\x7fELF\x02" or struct.unpack("<H", binary[18:20])[0] != 62:
         raise RuntimeError("Expected Linux amd64 ELF binary")
+    if component is None:
+        check_icons(files)
+    return files
+
+
+def check_icons(files):
     for size in (192, 512):
         png = files[f"dist/icon-{size}.png"]
         if struct.unpack(">II", png[16:24]) != (size, size):
             raise RuntimeError("Unexpected install icon dimensions")
-    return files
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('archive')
     parser.add_argument('--kind', choices=('generic', 'deployment'), default='deployment')
+    parser.add_argument('--component', choices=('web', 'server'))
     args = parser.parse_args()
     checked = check_archive(args.archive, args.kind)
-    print(f"Verified {len(checked)-1} files, {args.kind} archive, Linux amd64 binary, and PWA install icons.")
+    if args.component and json.loads(checked.get('release.json', b'{}')).get('component') != args.component:
+        parser.error('Archive does not match requested component')
+    print(f"Verified {len(checked)-1} files, {args.kind} archive.")

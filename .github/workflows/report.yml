@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       operation_id:
-        description: Exact operation ID, or latest for read-only preflight reporting
+        description: Exact operation ID, latest for server, or latest-web for web
         required: true
         default: latest
         type: string

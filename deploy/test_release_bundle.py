@@ -27,6 +27,22 @@ def fixture():
     return files
 
 
+def server_fixture():
+    files = {k: v for k, v in fixture().items() if not k.startswith('dist/')}
+    files['release.json'] = json.dumps({**json.loads(files['release.json']), 'schema': 2, 'component': 'server'}).encode()
+    files['deploy/web_release.py'] = b'# static migration helper'
+    return files
+
+
+def web_fixture():
+    files = {k: v for k, v in fixture().items() if k.startswith('dist/')}
+    files.update({'dist/sw.js': b'worker', 'dist/precache.json': b'{"urls":["/finevent/index.html"]}',
+                  'dist/manifest.webmanifest': b'{}', 'dist/assets/main-hash.js': b'script',
+                  'release.json': json.dumps({**json.loads(fixture()['release.json']), 'schema': 2,
+                                              'component': 'web', 'target': 'static'}).encode()})
+    return files
+
+
 class ReleaseBundleTests(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
@@ -45,6 +61,17 @@ class ReleaseBundleTests(unittest.TestCase):
                 archive.addfile(entry, io.BytesIO(data))
             if extra:
                 archive.addfile(extra, io.BytesIO(b''))
+
+    def test_split_artifacts_reject_missing_or_cross_component_contents(self):
+        for files in (web_fixture(), server_fixture()):
+            self.write(files)
+            check_archive(self.archive, 'generic')
+        for files in ({**web_fixture(), 'finevent': fixture()['finevent']},
+                      {**server_fixture(), 'dist/index.html': b'shell'},
+                      {**web_fixture(), 'dist/precache.json': b'{"urls":["/finevent/missing"]}'}):
+            self.write(files)
+            with self.assertRaises(RuntimeError):
+                check_archive(self.archive, 'generic')
 
     def test_generic_is_valid_but_cannot_be_deployed(self):
         self.write(fixture())

@@ -16,6 +16,8 @@ import sys
 import tempfile
 
 ID = re.compile(r'calendar-release-\d{8}T\d{6}Z-[a-f0-9]{8}')
+STATIC = runpy.run_path(str(Path(__file__).with_name('web_release.py')))
+WEB_ID = re.compile(r'web-release-\d{8}T\d{6}Z-[a-f0-9]{8}')
 BASELINE_ID = re.compile(r'persistence-check-\d{8}T\d{6}Z-[a-f0-9]{8}')
 DIGEST = re.compile(r'[a-f0-9]{64}')
 MAX_ARCHIVE = 128 * 1024**2
@@ -65,15 +67,23 @@ def parse_request(command):
     allowed = {'action', 'id', 'private'} if action == 'status' else {'action'}
     if action == 'deploy':
         allowed = {'action', 'id', 'profile', 'after_review', 'replace_observation', 'archive_sha256', 'content_sha256', *EVIDENCE_OPTIONS}
+    if action in ('web-deploy', 'web-rollback'):
+        allowed = {'action', 'id', 'after_review'}
+        if action == 'web-deploy':
+            allowed.update(('archive_sha256', 'content_sha256'))
     if action == 'baseline':
         allowed = {'action', 'id', 'archive_sha256', 'content_sha256'}
-    require(action in ('preflight', 'status', 'deploy', 'baseline') and not set(request) - allowed, 'Unsupported request')
+    require(action in ('preflight', 'status', 'deploy', 'baseline', 'web-deploy', 'web-rollback') and not set(request) - allowed, 'Unsupported request')
     if action != 'preflight':
         pattern = BASELINE_ID if action == 'baseline' else ID
-        require(isinstance(request.get('id'), str) and (pattern.fullmatch(request['id']) or action == 'status' and (request['id'] == 'latest' or BASELINE_ID.fullmatch(request['id']))), 'Invalid operation ID')
+        if action.startswith('web-'):
+            pattern = WEB_ID
+            previous = request.get('after_review')
+            require(isinstance(previous, str) and (previous == 'initial' or WEB_ID.fullmatch(previous)) and previous != request.get('id'), 'Specify the previous web operation or initial')
+        require(isinstance(request.get('id'), str) and (pattern.fullmatch(request['id']) or action == 'status' and (request['id'] in ('latest', 'latest-web') or WEB_ID.fullmatch(request['id']) or BASELINE_ID.fullmatch(request['id']))), 'Invalid operation ID')
     if action == 'status':
         require(isinstance(request.get('private', False), bool), 'Invalid report option')
-    if action in ('deploy', 'baseline'):
+    if action in ('deploy', 'baseline', 'web-deploy'):
         for key in ('archive_sha256', 'content_sha256'):
             require(isinstance(request.get(key), str) and DIGEST.fullmatch(request[key]), 'Invalid release digest')
     if action == 'deploy':
@@ -133,6 +143,14 @@ class Controller:
         return dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
 
     def status(self, run_id, private=False):
+        web_records = self.state/'web'
+        if run_id == 'latest-web':
+            # One durable record is both journal and predecessor; no two-file commit.
+            records = (read(path) for path in web_records.glob('web-release-*.json'))
+            return max(records, key=lambda item: item['sequence'], default={'found': False})
+        if run_id and WEB_ID.fullmatch(run_id):
+            path = web_records/(run_id+'.json')
+            return read(path) if path.is_file() else {'found': False}
         if run_id == 'latest':
             run_id = self.latest()
         if not run_id:
@@ -173,10 +191,12 @@ class Controller:
         require((Path(self.config['appRoot'])/'current').is_dir(), 'Initialize the application separately before using Actions')
         require((Path(self.config['dataRoot'])/'config.json').is_file(), 'Application configuration is missing')
         require(self.backups.is_dir(), 'Backup directory is missing')
-        return {'protocol': 2, 'ready': True, 'latest': self.status('latest')}
+        return {'protocol': 3, 'ready': True, 'latest': self.status('latest')}
 
     @staticmethod
     def identity(request):
+        if request['action'].startswith('web-'):
+            return {key: request[key] for key in ('action', 'content_sha256', 'after_review') if key in request}
         identity = {key: request.get(key) for key in ('content_sha256', 'profile', 'after_review', 'replace_observation')}
         identity.update({key: request[key] for key in EVIDENCE_OPTIONS if request.get(key)})
         return identity
@@ -213,6 +233,76 @@ class Controller:
                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
         require(result.returncode == 0, 'Predecessor verification failed; no operation registered')
 
+    def receive(self, temporary, request, stream, kind):
+        archive = temporary/'release.tar.gz'
+        digest, size = hashlib.sha256(), 0
+        with archive.open('wb') as output:
+            while chunk := stream.read(1024 * 1024):
+                size += len(chunk)
+                require(size <= MAX_ARCHIVE, 'Archive is too large')
+                output.write(chunk)
+                digest.update(chunk)
+        require(digest.hexdigest() == request['archive_sha256'], 'Archive transfer digest mismatch')
+        files = self.checker(archive, kind)
+        require(content_digest(files) == request['content_sha256'], 'Release content identity mismatch')
+        return files
+
+    def publish_web(self, request, stream):
+        web = Path(self.config['appRoot'])/'web'
+        require((web/'ready').is_file(), 'Migrate the static route before publishing web')
+        records = self.state/'web'
+        records.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with exclusive(records/'register.lock'):
+            operation = request['id']
+            record = records/(operation+'.json')
+            identity = self.identity(request)
+            if record.exists():
+                result = read(record)
+                require(result['identity'] == identity, 'Web operation ID already in use')
+                if result['needs_recovery']:
+                    require(self.status('latest-web')['id'] == operation, 'A later web operation exists')
+                    return self.finish_web(web, record, result)
+                return result
+            latest = self.status('latest-web')
+            require(request['after_review'] == latest.get('id', 'initial'), 'Stale web predecessor')
+            require(not latest.get('needs_recovery'), 'Inspect interrupted web switch before proceeding')
+            previous = STATIC['current'](web)
+            require(previous == latest.get('active', previous), 'Active web release changed outside the operation')
+            if request['action'] == 'web-rollback':
+                require(latest.get('rollback_target'), 'No previous web release to restore')
+                version = latest['rollback_target']
+            else:
+                with tempfile.TemporaryDirectory(dir=records) as temporary:
+                    files = self.receive(Path(temporary), request, stream, 'generic')
+                    require(json.loads(files['release.json'])['component'] == 'web', 'Expected static release')
+                    STATIC['stage'](web, operation, files)
+                version = operation
+            result = {'found': True, 'id': operation, 'identity': identity, 'previous': previous,
+                      'active': previous, 'target': version, 'rollback_target': latest.get('rollback_target'), 'status': 'needs_recovery', 'needs_recovery': True}
+            result['sequence'] = latest.get('sequence', 0) + 1
+            if request['action'] == 'web-deploy':
+                result['source_commit'] = json.loads(files['release.json'])['source_commit']
+            save(record, result)
+            return self.finish_web(web, record, result)
+
+    def finish_web(self, web, record, result):
+        previous, target = result['previous'], result['target']
+        current = STATIC['current'](web)
+        require(current in (previous, target), 'Web pointer changed outside this operation')
+        try:
+            if current != target:
+                STATIC['switch'](web, target)
+            STATIC['verify'](self.config['siteHost'], web/'current')
+        except Exception:
+            STATIC['switch'](web, previous)
+            if previous:
+                STATIC['verify'](self.config['siteHost'], web/'current')
+            result.update(status='failed', has_failure=True, needs_recovery=False)
+        else:
+            result.update(status='completed', active=target, rollback_target=previous, needs_recovery=False)
+        save(record, result)
+        return result
+
     def deploy(self, request, stream):
         self.preflight()
         self.state.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -233,23 +323,15 @@ class Controller:
                     require(failed.is_file() and read(failed)['identity'].get('after_review') == request['after_review'], 'Failed operation is not a registered successor of the reviewed release')
             with tempfile.TemporaryDirectory(prefix='receive-', dir=self.state) as temporary:
                 temporary = Path(temporary)
-                archive = temporary/'release.tar.gz'
-                digest, size = hashlib.sha256(), 0
-                with archive.open('wb') as output:
-                    while chunk := stream.read(1024 * 1024):
-                        size += len(chunk)
-                        require(size <= MAX_ARCHIVE, 'Archive is too large')
-                        output.write(chunk)
-                        digest.update(chunk)
-                require(digest.hexdigest() == request['archive_sha256'], 'Archive transfer digest mismatch')
-                files = self.checker(archive)
-                require(content_digest(files) == request['content_sha256'], 'Release content identity mismatch')
+                files = self.receive(temporary, request, stream, 'deployment')
                 require('deploy/calendar_release.py' in files, 'Missing release runner')
                 if baseline:
                     require('deploy/persistence_baseline.py' in files, 'Missing read-only baseline runner')
                 if request.get('profile') == 'news':
                     require('deploy/news_release.py' in files, 'Missing news verification runner')
                 metadata = json.loads(files.get('release.json', b'{}'))
+                if (Path(self.config['appRoot'])/'web/ready').is_file() and not baseline:
+                    require(metadata.get('component') == 'server', 'Use a server-only archive after the static cutover')
                 bundle = temporary/'bundle'
                 for name, data in files.items():
                     target = bundle/name
@@ -274,7 +356,9 @@ def main():
     os.umask(0o077)
     request = parse_request(os.environ.get('SSH_ORIGINAL_COMMAND', ''))
     controller = Controller(read(Path(__file__).with_name('config.json')))
-    if request['action'] in ('deploy', 'baseline'):
+    if request['action'].startswith('web-'):
+        result = controller.publish_web(request, sys.stdin.buffer)
+    elif request['action'] in ('deploy', 'baseline'):
         result = controller.deploy(request, sys.stdin.buffer)
     elif request['action'] == 'status':
         result = controller.status(request['id'], request.get('private', False))

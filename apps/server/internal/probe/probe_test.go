@@ -31,7 +31,7 @@ func testApp(t *testing.T) *App {
 		t.Fatal(e)
 	}
 	hash, _ := bcrypt.GenerateFromPassword([]byte("test-password-123"), bcrypt.MinCost)
-	return NewApp(Config{Origin: "https://example.test", PasswordHash: string(hash), VAPIDPrivate: private, VAPIDPublic: public, Contact: "mailto:owner@example.test"}, s, t.TempDir())
+	return NewApp(Config{Origin: "https://example.test", PasswordHash: string(hash), VAPIDPrivate: private, VAPIDPublic: public, Contact: "mailto:owner@example.test"}, s)
 }
 func authed(t *testing.T, a *App, method, path, body string) *http.Request {
 	t.Helper()
@@ -369,11 +369,8 @@ func TestRetentionAndStaticIsolation(t *testing.T) {
 	if e = a.Store.DB.QueryRow(`SELECT COUNT(*) FROM resources`).Scan(&n); e != nil || n != 0 {
 		t.Fatal(n, e)
 	}
-	if e = os.WriteFile(filepath.Join(a.Web, "index.html"), []byte("shell"), 0600); e != nil {
-		t.Fatal(e)
-	}
 	w := perform(a, httptest.NewRequest("GET", "/finevent/index.html", nil))
-	if w.Code != 200 || w.Body.String() != "shell" {
+	if w.Code != http.StatusNotFound {
 		t.Fatal(w.Code, w.Body.String())
 	}
 	w = perform(a, httptest.NewRequest("GET", "/finevent/api/missing", nil))

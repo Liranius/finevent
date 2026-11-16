@@ -35,12 +35,12 @@ $pinned = Join-Path $access 'known_hosts'
 if (-not $IsWindows) { & chmod 600 $key $pinned }
 $stage = Join-Path $access 'bootstrap'
 New-Item -ItemType Directory -Path $stage -Force | Out-Null
-foreach ($name in @('release_control.py', 'bootstrap_release.py')) {
+foreach ($name in @('release_control.py', 'bootstrap_release.py', 'web_release.py')) {
     Copy-Item -LiteralPath (Join-Path $repoRoot "deploy/$name") -Destination $stage -Force
 }
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'check-release.py') -Destination $stage -Force
 Copy-Item -LiteralPath "$key.pub" -Destination (Join-Path $stage 'deploy.pub') -Force
-@{ appRoot=(ConvertTo-FineventDeploymentText '/srv/example/finevent'); dataRoot=(ConvertTo-FineventDeploymentText '/srv/example/finevent-data'); backupRoot=(ConvertTo-FineventDeploymentText '/srv/example/finevent-backups') } |
+@{ siteHost=(ConvertTo-FineventDeploymentText 'www.example.com'); appRoot=(ConvertTo-FineventDeploymentText '/srv/example/finevent'); dataRoot=(ConvertTo-FineventDeploymentText '/srv/example/finevent-data'); backupRoot=(ConvertTo-FineventDeploymentText '/srv/example/finevent-backups') } |
     ConvertTo-Json | Set-Content -LiteralPath (Join-Path $stage 'config.json') -Encoding utf8
 $archive = Join-Path $access 'bootstrap.tar.gz'
 & tar -czf $archive -C $stage .

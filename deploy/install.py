@@ -19,8 +19,12 @@ import sys
 import time
 import tempfile
 
+import web_release
+
 ROOT = Path("/srv/example/finevent")
 DATA = Path("/srv/example/finevent-data")
+MIGRATION_LOCK = Path("/run/lock/finevent-memory-recovery.lock")
+BACKUPS = Path("/srv/example/finevent-backups")
 TREND = Path("/srv/example/trendradar/output")
 SNIPPET = Path("/etc/nginx/snippets/example-app.conf")
 HOST = "www.example.com"
@@ -346,8 +350,9 @@ def rollback(directory):
         run("systemctl", "enable", "finevent.service")
     if state.get("timer_enabled"):
         run("systemctl", "enable", "finevent-backup.timer")
-    run("nginx", "-t", capture=True)
-    run("systemctl", "reload", "nginx")
+    if any(record["path"] == str(SNIPPET) for record in state["files"]):
+        run("nginx", "-t", capture=True)
+        run("systemctl", "reload", "nginx")
     if state["was_active"]:
         run("systemctl", "start", "finevent.service")
     if state["timer_active"]:
@@ -362,23 +367,65 @@ def verify_bundle(bundle):
         path = (bundle / relative).resolve()
         if not path.is_relative_to(bundle.resolve()) or sha(path) != expected:
             raise RuntimeError(f"Release checksum mismatch: {relative}")
-    for required in ("finevent", "dist/index.html", "deploy/finevent.service", "deploy/install.py"):
-        if required not in manifest:
-            raise RuntimeError(f"Missing release file: {required}")
     metadata = bundle / 'release.json'
-    if metadata.exists() and json.loads(metadata.read_text(encoding='utf-8-sig')).get('kind') != 'deployment':
+    identity = json.loads(metadata.read_text(encoding='utf-8-sig')) if metadata.exists() else {}
+    if identity and identity.get('kind') != 'deployment':
         raise RuntimeError('Render the generic archive with deployment settings before installation')
+    required = ['finevent', 'deploy/finevent.service', 'deploy/install.py']
+    if identity.get('component') != 'server':
+        required.append('dist/index.html')
+    for name in required:
+        if name not in manifest:
+            raise RuntimeError(f"Missing release file: {name}")
 
 
-def check_settings_socket():
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
-        conn.settimeout(8)
-        conn.connect('/run/finevent-trend-settings.sock')
-        conn.sendall(b'{"op":"read"}\n')
-        with conn.makefile('rb') as stream:
-            reply = json.loads(stream.readline(2 * 1024 * 1024))
-    if reply.get('status') != 200 or not isinstance(reply.get('data', {}).get('sources'), list):
-        raise RuntimeError('TrendRadar settings worker could not read the mounted configuration')
+def migrate_web(bundle):
+    """Cut over the existing HTTPS include while the legacy service still serves its dist."""
+    import fcntl
+    with MIGRATION_LOCK.open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        verify_bundle(bundle)
+        web = ROOT/'web'
+        snippet = (bundle/'deploy/finevent.nginx.conf').read_bytes()
+        site, patched = find_site()
+        if site.read_text() != patched or not SNIPPET.is_file():
+            raise RuntimeError('An installed Finevent HTTPS route is required for migration')
+        if (web/'ready').exists():
+            if SNIPPET.read_bytes() != snippet:
+                raise RuntimeError('Installed static route differs from the migration template')
+            web_release.verify(HOST, web/'current')
+            return
+        legacy = (ROOT/'current').resolve(strict=True)
+        verify_bundle(legacy)
+        hashes = json.loads((legacy/'sha256.json').read_text(encoding='utf-8-sig'))
+        files = {name: (legacy/name).read_bytes() for name in hashes if name.startswith('dist/')}
+        if 'dist/index.html' not in files:
+            raise RuntimeError('Cannot seed static hosting from this installed release')
+        old_snippet = (legacy/'deploy/finevent.nginx.conf').read_bytes()
+        installed = SNIPPET.read_bytes()
+        interrupted = installed == snippet and web_release.current(web) == 'legacy'
+        if installed != old_snippet and not interrupted:
+            raise RuntimeError('Installed routing differs from the previous release; review before migration')
+        previous = web_release.current(web)
+        destination = web_release.stage(web, 'legacy', files)
+        directory = BACKUPS / ('web-migration-'+datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ'))
+        directory.mkdir(mode=0o700)
+        state = {'files': []}
+        web_release.switch(web, destination.name)
+        try:
+            replace_file(SNIPPET, snippet, directory, state)
+            run('nginx', '-t', capture=True)
+            run('systemctl', 'reload', 'nginx')
+            web_release.verify(HOST, destination)
+            wait_for_https(directory)
+            (web/'ready').touch()
+        except BaseException:
+            replace_file(SNIPPET, old_snippet, directory, state)
+            run('nginx', '-t', capture=True)
+            run('systemctl', 'reload', 'nginx')
+            web_release.switch(web, previous)
+            raise
+        print(f'Static hosting enabled. Previous route and evidence: {directory}')
 
 
 def install(*, evidence_callback=None):
@@ -390,7 +437,11 @@ def install(*, evidence_callback=None):
     verify_bundle(bundle)
     # The socket worker uses the system interpreter, including on hosts with a separate venv.
     run("/usr/bin/python3", "-I", "-c", "import yaml")
-    site, patched_site = find_site()
+    first_install = not (ROOT/'current').exists()
+    if first_install:
+        site, patched_site = find_site()
+    elif not (ROOT/'web/ready').is_file():
+        raise RuntimeError('Migrate the installed static site before releasing the API')
     if available_memory() < 128 * 1024 * 1024:
         raise RuntimeError("Less than 128 MiB available before startup; no service changes made")
     if shutil.disk_usage("/opt").free < 1024**3:
@@ -443,9 +494,10 @@ def install(*, evidence_callback=None):
         for unit in ("finevent.service", "finevent-backup.service", "finevent-backup.timer",
                      "finevent-trend-settings.socket", "finevent-trend-settings@.service"):
             replace_file(Path("/etc/systemd/system") / unit, (release / "deploy" / unit).read_bytes(), directory, state)
-        replace_file(SNIPPET, (release / "deploy/finevent.nginx.conf").read_bytes(), directory, state)
-        replace_file(site, patched_site.encode(), directory, state)
-        run("nginx", "-t", capture=True)
+        if first_install:
+            replace_file(SNIPPET, (release / "deploy/finevent.nginx.conf").read_bytes(), directory, state)
+            replace_file(site, patched_site.encode(), directory, state)
+            run("nginx", "-t", capture=True)
         run("systemctl", "daemon-reload")
         run("systemctl", "start", "finevent.service")
         check_settings_socket()
@@ -465,10 +517,14 @@ def install(*, evidence_callback=None):
         events = Path("/sys/fs/cgroup" + group) / "memory.events"
         if events.exists() and re.search(r"^oom_kill\s+[1-9]", events.read_text(), re.MULTILINE):
             raise RuntimeError("Observed OOM termination; reverting")
-        run("systemctl", "reload", "nginx")
+        if first_install:
+            run("systemctl", "reload", "nginx")
         wait_for_https(directory)
         run("systemctl", "enable", "finevent.service", "finevent-backup.timer")
         run("systemctl", "start", "finevent-backup.timer")
+        if first_install:
+            web_release.public_directory(ROOT/'web')
+            (ROOT/'web/ready').touch()
         report = {"status": "verification_service_installed", "url": f"https://{HOST}/finevent/", "release": str(release), "backup": str(directory), "available_mib": [round(n / 1024**2, 1) for n in readings], "real_device_push": "pending", "two_trading_days": "pending", "ai_concurrent_load": "pending"}
         (directory / "report.json").write_text(json.dumps(report, indent=2))
         print(json.dumps(report, indent=2))
@@ -483,8 +539,11 @@ def install(*, evidence_callback=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rollback", type=Path)
+    parser.add_argument("--migrate-web", action="store_true")
     args = parser.parse_args()
-    if args.rollback:
+    if args.migrate_web:
+        migrate_web(Path(__file__).resolve().parents[1])
+    elif args.rollback:
         rollback(args.rollback)
     else:
         install()

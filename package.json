@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "pnpm --filter @finevent/web dev",
-    "server": "go -C apps/server run ./cmd/finevent -data ../../var -web ../web/dist",
+    "server": "go -C apps/server run ./cmd/finevent -data ../../var",
     "build": "run-p type-check \"build-only {@}\" --",
     "preview": "pnpm --filter @finevent/web preview",
     "test:watch": "vitest",

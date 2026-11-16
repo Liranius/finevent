@@ -28,7 +28,6 @@ func main() {
 	listen := flag.String("listen", "127.0.0.1:8787", "listen address")
 	origin := flag.String("origin", "", "site origin (required with -init)")
 	contact := flag.String("contact", "", "VAPID contact URI (defaults to origin + /finevent/)")
-	web := flag.String("web", "dist", "static assets directory")
 	trend := flag.String("trendradar", "", "read-only TrendRadar output directory")
 	collect := flag.Bool("collect", false, "enable source sampling")
 	snapshot := flag.Bool("calendar-snapshot", false, "bootstrap the reviewed official calendar snapshot without enabling network collection")
@@ -75,7 +74,7 @@ func main() {
 			log.Fatal("development server must bind loopback")
 		}
 		if _, err = os.Stat(filepath.Join(*dir, "config.json")); os.IsNotExist(err) {
-			_, err = probe.InitConfig(*dir, "http://"+*listen, os.Getenv("FINEVENT_TEST_PASSWORD"), *contact)
+			_, err = probe.InitConfig(*dir, *origin, os.Getenv("FINEVENT_TEST_PASSWORD"), *contact)
 			if err != nil {
 				log.Fatal(err)
 			}
@@ -95,7 +94,7 @@ func main() {
 			log.Fatal("官方快照导入失败：", err)
 		}
 	}
-	app := probe.NewApp(cfg, store, *web)
+	app := probe.NewApp(cfg, store)
 	app.AIConfig, err = probe.LoadAIConfig(*dir)
 	if err != nil {
 		log.Print(err)

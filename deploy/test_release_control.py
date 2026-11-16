@@ -31,7 +31,7 @@ class BootstrapTests(unittest.TestCase):
                 (root/name).mkdir(parents=True, exist_ok=True)
             config = {'appRoot': str(root/'app'), 'dataRoot': str(root/'data'), 'backupRoot': str(root/'backups')}
             (source/'config.json').write_text(json.dumps(config))
-            for name in ('release_control.py', 'check-release.py'):
+            for name in ('release_control.py', 'web_release.py', 'check-release.py'):
                 (source/name).write_text('# trusted fixture')
             public = 'ssh-ed25519 '+base64.b64encode(b'\x00\x00\x00\x0bssh-ed25519\x00\x00\x00\x20'+b'a'*32).decode()
             (source/'deploy.pub').write_text(public)

@@ -33,7 +33,7 @@ if (-not $Archive) {
     $Archive = (Get-ChildItem -LiteralPath 'release' -Filter 'finevent-*.tar.gz' -File | Sort-Object Name -Descending | Select-Object -First 1).FullName
 }
 if (-not $Archive -or -not (Test-Path -LiteralPath $Archive -PathType Leaf)) { throw 'Build the verification release first' }
-& python scripts/check-release.py $Archive
+& python scripts/check-release.py $Archive --component server
 if ($LASTEXITCODE -ne 0) { throw 'Release verification failed' }
 $archiveName = Split-Path -Leaf $Archive
 if ($archiveName -notmatch '^finevent-\d{8}T\d{6}Z\.tar\.gz$') { throw 'Unexpected release filename' }
