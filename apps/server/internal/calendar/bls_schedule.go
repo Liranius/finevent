@@ -20,6 +20,10 @@ type blsRelease struct {
 	event                 Event
 }
 
+const productivitySeries = "Productivity and Costs"
+const preliminaryProductivity = productivitySeries + " (P)"
+const revisedProductivity = productivitySeries + " (R)"
+
 // An NYFed release has no reference period in its title. Only these exact
 // national series can be compared with the BLS schedule.
 var blsNYFedSeries = map[string]string{
@@ -29,8 +33,8 @@ var blsNYFedSeries = map[string]string{
 	"Job Openings and Labor Turnover Survey": "jolts",
 	"U.S. Import and Export Price Indexes":   "imports and exports",
 	"Employment Cost Index":                  "employment cost index",
-	"Productivity and Costs (P)":             "productivity & costs (preliminary)",
-	"Productivity and Costs (R)":             "productivity & costs (revised)",
+	preliminaryProductivity:                  "productivity & costs (preliminary)",
+	revisedProductivity:                      "productivity & costs (revised)",
 }
 
 const nationalBenchmark = "Current Employment Statistics Preliminary Benchmark (National)"
@@ -187,9 +191,16 @@ func importBLSRelease(tx *sql.Tx, r blsRelease, uniqueMonth bool, now int64) (bo
 	if err == sql.ErrNoRows {
 		full := r.name + " for " + r.period
 		id, err = oneBLSMatch(tx.Query(`SELECT id FROM calendar_events WHERE source='bls' AND
-			(lower(json_extract(payload,'$.title'))=lower(?) OR (lower(json_extract(payload,'$.title'))=lower(?) AND
+			(lower(trim(json_extract(payload,'$.title')))=lower(?) OR (lower(trim(json_extract(payload,'$.title')))=lower(?) AND
 			(instr(lower(json_extract(payload,'$.evidence')),lower(?))>0 OR
 			(instr(lower(json_extract(payload,'$.evidence')),lower(?||' for '))=0 AND start_day=?))))`, full, r.name, full, r.name, e.Start[:10]))
+	}
+	if err == sql.ErrNoRows && (r.name == preliminaryProductivity || r.name == revisedProductivity) {
+		// An ICS imported before this table may omit the preliminary/revised suffix.
+		id, err = oneBLSMatch(tx.Query(`SELECT id FROM calendar_events WHERE source='bls'
+			AND trim(json_extract(payload,'$.title'))=? COLLATE NOCASE AND json_extract(payload,'$.precision')='minute'
+			AND instr(lower(json_extract(payload,'$.evidence')),lower(?||' for '))=0
+			AND unixepoch(json_extract(payload,'$.start'))=unixepoch(?)`, productivitySeries, productivitySeries, e.Start))
 	}
 	if err == sql.ErrNoRows && r.nyfedID != "" {
 		err = tx.QueryRow(`SELECT id FROM calendar_events WHERE source='nyfed' AND source_id=? AND (? OR start_day=?)`, r.nyfedID, uniqueMonth, e.Start[:10]).Scan(&id)
@@ -341,7 +352,12 @@ func matchBLSRelease(tx *sql.Tx, e Event) (string, error) {
 				(lower(name)=lower(?) AND instr(lower(?),lower(name||' for '||period))>0)`, e.Title, e.Title, e.Evidence))
 			if err == sql.ErrNoRows && !strings.Contains(strings.ToLower(e.Evidence), strings.ToLower(e.Title)+" for ") {
 				id, err = oneBLSMatch(tx.Query(`SELECT event_id FROM calendar_bls_releases WHERE lower(name)=lower(?) AND release_day=?`, e.Title, e.Start[:10]))
-				if err == sql.ErrNoRows && (e.Evidence == e.Title || strings.HasPrefix(e.Evidence, e.Title+"; DTSTART")) {
+				if err == sql.ErrNoRows && strings.EqualFold(e.Title, productivitySeries) && e.Precision == "minute" {
+					// The ICS omits the stage. Only a unique release at the same instant can identify it.
+					id, err = oneBLSMatch(tx.Query(`SELECT r.event_id FROM calendar_bls_releases r JOIN calendar_events c ON c.id=r.event_id
+						WHERE r.name IN (?,?) AND json_extract(c.payload,'$.precision')='minute'
+						AND unixepoch(json_extract(c.payload,'$.start'))=unixepoch(?)`, preliminaryProductivity, revisedProductivity, e.Start))
+				} else if err == sql.ErrNoRows && (e.Evidence == e.Title || strings.HasPrefix(e.Evidence, e.Title+"; DTSTART")) {
 					id, err = oneBLSMatch(tx.Query(`SELECT event_id FROM calendar_bls_releases WHERE lower(name)=lower(?) AND substr(release_day,1,7)=?`, e.Title, e.Start[:7]))
 				}
 			}
