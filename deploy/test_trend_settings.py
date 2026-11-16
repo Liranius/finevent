@@ -1,4 +1,5 @@
 from contextlib import closing
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 import json
@@ -9,7 +10,24 @@ import unittest
 
 import calendar_release
 import calendar_review
+import install
 import trend_settings as settings
+
+
+class InstallerSettingsTests(unittest.TestCase):
+    def test_socket_readiness_requires_a_successful_sources_read(self):
+        for reply, ready in [({'status': 200, 'data': {'sources': []}}, True),
+                             ({'status': 503}, False), ({'status': 200, 'data': {}}, False)]:
+            with self.subTest(reply=reply), patch.object(install, 'socket') as socket_module:
+                connection = socket_module.socket.return_value.__enter__.return_value
+                connection.makefile.return_value = BytesIO(json.dumps(reply).encode() + b'\n')
+                if ready:
+                    install.check_settings_socket()
+                else:
+                    with self.assertRaises(RuntimeError):
+                        install.check_settings_socket()
+                connection.connect.assert_called_once_with('/run/finevent-trend-settings.sock')
+                connection.sendall.assert_called_once_with(b'{"op":"read"}\n')
 
 
 class SettingsTests(unittest.TestCase):

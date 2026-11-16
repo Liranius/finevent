@@ -428,6 +428,17 @@ def migrate_web(bundle):
         print(f'Static hosting enabled. Previous route and evidence: {directory}')
 
 
+def check_settings_socket():
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
+        conn.settimeout(8)
+        conn.connect('/run/finevent-trend-settings.sock')
+        conn.sendall(b'{"op":"read"}\n')
+        with conn.makefile('rb') as stream:
+            reply = json.loads(stream.readline(2 * 1024 * 1024))
+    if reply.get('status') != 200 or not isinstance(reply.get('data', {}).get('sources'), list):
+        raise RuntimeError('TrendRadar settings worker could not read the mounted configuration')
+
+
 def install(*, evidence_callback=None):
     import pwd
     if os.geteuid() != 0:
