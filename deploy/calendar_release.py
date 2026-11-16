@@ -379,11 +379,15 @@ def resource_checks_passed(report):
             and 0 < metrics.get('finevent_current_peak_mib', 999) <= 96)
 
 
+def health_passed(health):
+    return all(health.get(path) == {'exit': 0, 'http_status': '200'}
+               for path in ('/finevent/healthz', '/TrendRadar/content/'))
+
+
 def runtime_passed(report, trend_review=None):
     return (resource_checks_passed(report)
             and (report.get('trendradar', {}).get('status') == 'passed' or calendar_review.accepted(report, trend_review))
-            and all(report.get('health', {}).get(path) == {'exit': 0, 'http_status': '200'}
-                    for path in ('/finevent/healthz', '/TrendRadar/content/')))
+            and health_passed(report.get('health', {})))
 
 
 def validate_previous(report, run_id, active_release, trend_review=None):
@@ -610,7 +614,7 @@ def restart_check(directory, report, current):
             'host_reboot_tested': False}
 
 
-def trend_outputs(start, end, minimum_cycles=2):
+def trend_outputs(start, end, minimum_cycles=2, *, post_start_cycles=False):
     records, sources = [], []
     periods = trend_settings.observation_periods(TREND.parent/'config')
     day = datetime.fromtimestamp(start, ZONE).date()
@@ -631,6 +635,8 @@ def trend_outputs(start, end, minimum_cycles=2):
         polls = conn.execute("SELECT COUNT(*),SUM(CASE WHEN success=0 THEN 1 ELSE 0 END),MAX(CASE WHEN success=1 THEN completed END) FROM polls WHERE source='trendradar' AND started>=?", (start,)).fetchone()
     html = TREND/'index.html'
     cycles = {r['at']//1800 for r in records if r['items'] > 0 or r['expected'] == []}
+    if post_start_cycles:
+        cycles = {slot for slot in cycles if slot*1800 >= start}
     good = (len(cycles) >= minimum_cycles and all(r['complete'] for r in records)
             and all(s['status'] == 'success' for s in sources) and polls[0] > 0 and polls[1] == 0
             and polls[2] is not None and end-polls[2] <= 180
@@ -671,7 +677,9 @@ def observe(directory, report, current):
     check_sample(baseline, observation_baseline(report))
     window = baselines.release_window(report, current, pid, identities)
     first = report['initial_calendar']
-    started = int(time.time())
+    observed_at = time.time()
+    started = int(observed_at)
+    comparison = baselines.WindowComparison(directory, report, observed_at)
     end = started+OBSERVATION_SECONDS
     report.update(status='observing', stage='scheduled_sync_and_resources', observation_started=stamp(),
                   planned_end=datetime.fromtimestamp(end, ZONE).isoformat())
@@ -684,10 +692,14 @@ def observe(directory, report, current):
             stream.write(json.dumps(row)+'\n')
             # Preserve the failing sample before the resource guard raises and rollback starts.
             report['resources'] = resource_summary(samples, baseline)
-            check_sample(row, baseline)
+            comparison.sample(row, baseline)
             if time.time()-last_export >= 60:
                 report['resources'] = resource_summary(samples, baseline)
-                report['calendar'] = calendar_results(first, calendar_state())
+                state = calendar_state()
+                report['calendar'] = calendar_results(first, state)
+                comparison.checkpoint(lambda: source_acceptance(
+                    report['calendar'], state, datetime.now(ZONE).date().isoformat()
+                )['status'] == 'accepted_with_source_limits')
                 recovery.save(directory/'report.json', report)
                 stream.flush()
                 last_export = time.time()

@@ -212,6 +212,8 @@ GitHub 的 `production` environment 仅允许 `main` 分支，配置三个 envir
 
 后端发布默认从已审核的上一次后端验收报告读取基线。新闻和日历验收直接使用最终重启后的采样，交互式 AI 验收在最后一次重启后补做 65 分钟只读观察。报告的 `next_baseline` 给出私有证据文件 `next-baseline.json` 的摘要和窗口结束时间。下次发布会核对摘要、距窗口结束不超过七天、当前版本和进程身份、配置、连续资源记录、至少两轮正常采集及 HTTPS。通过后直接进入安装。旧报告缺少证据、证据过期、身份变化或历史断档时，服务器会在安装前自动观察 65 分钟，私有报告的 `preflight_baseline` 记录原因和预计结束时间。新 OOM、已发现的内存压力及固化配置异常仍会阻断安装。纯前端发布和回退都使用独立的前端发布记录。
 
+后端私有报告的 `window_comparison` 用于比较观察时长。时间为 Unix 秒。`baseline_ready_at` 记录首次观察到本窗口启动后的两轮采集、产物更新后的成功导入、HTTPS 及连续资源采样均通过的时刻。`business_ready_at` 记录业务条件首次通过的时刻。`candidate_at` 还要求同次检查的业务条件通过（日历来源验收或新闻专项，含 60 次 API 采样）。探测约每分钟一次，空值表示尚未观察到。只读复验也记录这组字段，安装前补验和 AI 末次重启后的数据分别在 `preflight_baseline` 和 `post_restart_baseline` 下。比较 `candidate_at` 与实际结束时间，并结合 `tail` 的样本数、内存起点/峰值/末值、首个资源异常和发布最终状态评估提前结束的影响。正式放行及基线复用仍使用原验收条件。
+
 也可用 `pwsh -NoProfile -File scripts/verify-baseline.ps1 -Archive <已核对来源的环境渲染包>` 单独启动只读复验，以 `-Report -RunId <persistence-check-ID>` 或 Actions **Report** 下载报告。审核后可用 `-BaselineId` 与 `-BaselineSha256`（Actions 对应 `baseline_id` / `baseline_sha256`）指定该份证据。显式指定的报告须通过七天有效期和连续历史检查。只读观察不会重启服务或触发采集、模型请求，其证据范围从本次观察开始。
 
 若最新部署明确在安装前失败，审核原报告后可同时传入 `-RecoverPreflight <失败ID>`、`-FailedReportSha256 <报告摘要>`，`-AfterReview` 仍指向前一个已完成验收的操作；Actions 使用相应的 snake_case 参数。仅接受已停止、未进入安装、无安装/回滚/观察替换痕迹的 calendar/news 失败；重新复核原前序验收及当前版本，保留失败记录，以新 ID 登记恢复操作。报告变化、进程仍活动、安装结果不明或 AI 初始化失败均不能用此入口放行。服务端该恢复功能要求控制器协议 2 或更高，独立前端发布使用协议 3：沿用已有专用密钥再次运行初始化脚本即可，不改变生产应用。

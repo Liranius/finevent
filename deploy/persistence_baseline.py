@@ -1,12 +1,15 @@
 """Renew evidence by observing the unchanged installation; never apply persistence again."""
 
 import argparse
+from concurrent.futures import Future
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
+from threading import Thread
 import time
 
 import calendar_release as calendar
@@ -14,6 +17,110 @@ import calendar_release as calendar
 ID = re.compile(r'persistence-check-\d{8}T\d{6}Z-[a-f0-9]{8}')
 OBSERVATION_SECONDS = 65*60
 SCOPE = 'new_observation_window_and_after; earlier_retention_gap_not_reconstructed'
+
+
+class WindowComparison:
+    """Measure a possible earlier cutoff without participating in the release decision."""
+
+    def __init__(self, directory, report, start):
+        self.directory = directory
+        self.report = report
+        self.start = start
+        self.data = report['window_comparison'] = {
+            'business_ready_at': None, 'baseline_ready_at': None, 'candidate_at': None,
+            'probes_completed': 0, 'probe_errors': 0, 'tail': None,
+        }
+        self.first_sample = None
+        self.pending = None
+        self.business_ready = False
+
+    def checkpoint(self, business_check):
+        if self.data['candidate_at'] is not None:
+            return
+        # Reads of the settings lock, SQLite and HTTPS must not stall five-second resource sampling.
+        try:
+            self.business_ready = business_check()
+            now = time.time()
+            if self.business_ready and self.data['business_ready_at'] is None:
+                self.data['business_ready_at'] = now
+            if self.pending is not None or (self.data['baseline_ready_at'] and not self.business_ready):
+                return
+            if now < (math.ceil(self.start / 1800) + 1) * 1800:
+                return
+            future = Future()
+            Thread(target=self.probe, args=(future, self.start, now), daemon=True).start()
+            self.pending = (future, now, self.business_ready)
+        except Exception as error:
+            self.business_ready = False
+            self.error(error)
+
+    @staticmethod
+    def probe(future, start, end):
+        try:
+            trend = calendar.trend_outputs(start, int(end), post_start_cycles=True)
+            ready = (trend['status'] == 'passed' and trend['distinct_cycles'] >= 2
+                     and trend['html_mtime'] <= trend['last_import'] <= end)
+            if ready:
+                health = calendar.recovery.public_health()
+                ready = calendar.health_passed(health)
+            future.set_result(ready)
+        except Exception as error:
+            # Store only the exception type in private diagnostics.
+            future.set_exception(error)
+
+    def error(self, error):
+        self.data['probe_errors'] += 1
+        self.data['last_probe_error'] = type(error).__name__
+
+    def sample(self, row, baseline):
+        if self.first_sample is None:
+            self.first_sample = row['at']
+        tail = self.data['tail']
+        memory = row['finevent_current'] / calendar.MIB
+        if tail is not None:
+            tail['samples'] += 1
+            tail['last_sample_at'] = row['at']
+            tail['finevent_last_mib'] = memory
+            tail['finevent_peak_mib'] = max(tail['finevent_peak_mib'], memory)
+            tail['host_available_min_mib'] = min(tail['host_available_min_mib'], row['available'] / calendar.MIB)
+        try:
+            calendar.check_sample(row, baseline)
+        except RuntimeError as error:
+            if tail is not None:
+                self.issue(row, str(error))
+            raise
+        metrics = self.report['resources']
+        if tail is not None and metrics['max_sample_interval_seconds'] > 15:
+            self.issue(row, 'Resource sampling gap exceeds 15 seconds')
+        if self.pending is None or not self.pending[0].done():
+            return
+        future, requested, business_at_probe = self.pending
+        self.pending = None
+        try:
+            ready = future.result()
+            self.data['probes_completed'] += 1
+        except Exception as error:
+            self.error(error)
+            return
+        now = time.time()
+        if not (ready and 0 <= now-requested <= 60 and -1 < self.first_sample-self.start <= 15
+                and 0 <= now-row['at'] <= 15 and calendar.resource_checks_passed(self.report)):
+            return
+        if self.data['baseline_ready_at'] is None:
+            self.data['baseline_ready_at'] = now
+        if business_at_probe and self.business_ready:
+            self.data['candidate_at'] = now
+            self.data['tail'] = {
+                'samples': 0, 'last_sample_at': None, 'first_resource_issue': None,
+                'finevent_at_candidate_mib': memory, 'finevent_last_mib': memory, 'finevent_peak_mib': memory,
+                'host_available_min_mib': row['available'] / calendar.MIB,
+            }
+
+    def issue(self, row, reason):
+        tail = self.data['tail']
+        if tail['first_resource_issue'] is None:
+            tail['first_resource_issue'] = {'at': row['at'], 'reason': reason}
+            calendar.recovery.save(self.directory/'report.json', self.report)
 
 
 class InsufficientWindow(RuntimeError):
@@ -76,6 +183,7 @@ def collect(directory, report):
     report.update(status='observing', stage='readonly_baseline', basis=basis, initial=current,
                   process_identities=identities, observation_started=calendar.stamp(), history_scope=SCOPE)
     start = time.time()
+    comparison = WindowComparison(directory, report, start)
     deadline = time.monotonic()+OBSERVATION_SECONDS
     report['planned_end'] = datetime.fromtimestamp(start+OBSERVATION_SECONDS, calendar.ZONE).isoformat()
     calendar.recovery.save(directory/'report.json', report)
@@ -88,9 +196,10 @@ def collect(directory, report):
             output.write(json.dumps(row)+'\n')
             output.flush()
             report['resources'] = calendar.resource_summary(samples, current['baseline'])
-            calendar.check_sample(row, current['baseline'])
+            comparison.sample(row, current['baseline'])
             calendar.require(report['resources']['max_sample_interval_seconds'] <= 15, 'Resource sampling gap exceeds 15 seconds')
             if time.monotonic()-exported >= 60:
+                comparison.checkpoint(lambda: True)
                 calendar.recovery.save(directory/'report.json', report)
                 exported = time.monotonic()
             if time.monotonic() >= deadline:
@@ -178,7 +287,12 @@ def observe_for_operation(directory, operation, folder, reason):
     operation[folder] = {'reason': reason, 'planned_end': planned}
     calendar.recovery.save(directory/'report.json', operation)
     window = {'id': operation['id']}
-    collect(evidence, window)
+    try:
+        collect(evidence, window)
+    finally:
+        if 'window_comparison' in window:
+            operation[folder]['observation_started'] = window['observation_started']
+            operation[folder]['window_comparison'] = window['window_comparison']
     return window, calendar.recovery.sha(evidence/'report.json')
 
 

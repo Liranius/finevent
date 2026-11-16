@@ -248,6 +248,7 @@ def observe(directory, report, current):
     window = baselines.release_window(report, current, pid, identities)
     start = calendar.stamp()
     started = datetime.fromisoformat(start).timestamp()
+    comparison = baselines.WindowComparison(directory, report, started)
     end = started+OBSERVATION_SECONDS
     report.update(status='observing', stage='news_and_resources', observation_started=start,
                   planned_end=datetime.fromtimestamp(end, calendar.ZONE).isoformat(), news_api_samples=0,
@@ -260,7 +261,7 @@ def observe(directory, report, current):
             samples.append(row)
             stream.write(json.dumps(row)+'\n')
             report['resources'] = calendar.resource_summary(samples, baseline)
-            calendar.check_sample(row, baseline)
+            comparison.sample(row, baseline)
             if time.time()-last_probe >= 60:
                 last_probe = time.time()
                 report['news_api'] = probe_api()
@@ -275,7 +276,9 @@ def observe(directory, report, current):
                     report['news_push_api'] = news_push_release.probe()
                 report['news_api_samples'] += 1
                 report['news_index'] = state(report['news_api']['rule_version'])
-                report['news_polls'] = polls(started, int(time.time()))
+                polled_at = int(time.time())
+                report['news_polls'] = polls(started, polled_at)
+                comparison.checkpoint(lambda: checks_passed(dict(report, news_poll_end=polled_at)))
                 recovery.save(directory/'report.json', report)
                 stream.flush()
             time.sleep(5)
