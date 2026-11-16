@@ -56,8 +56,9 @@ class CalendarReleaseTests(unittest.TestCase):
     def test_supplement_and_snapshot_do_not_turn_primary_failure_into_success(self):
         first, final = state(), state(121601, failed='bls')
         final['sources']['nbs'].update(last_success=0, error='timeout', count=0)
-        expected = release.snapshot_manifest()
-        final['snapshots'] = [{'source': 'nbs', 'id': expected['id'], 'metadata': expected,
+        expected = dict(id='sample-nbs', sha256='a'*64, year=2026, entries=47, retrieved_at=1, reviewed_at=2,
+                        url='https://www.stats.gov.cn/example.html')
+        final['snapshots'] = [{'source': 'nbs', 'id': expected['id'], 'metadata': expected, 'package_review': dict(expected),
                                'body_sha256': expected['sha256'], 'active_entries': 47,
                                'active_coverage_end': '2026-12-31'}]
         result = release.calendar_results(first, final)
@@ -77,8 +78,9 @@ class CalendarReleaseTests(unittest.TestCase):
             with self.subTest(source=source):
                 failed = release.calendar_results(first, state(121601, failed=source))
                 self.assertEqual(release.source_acceptance(failed, final, '2026-10-31')['status'], 'needs_review')
-        for kind in ('checksum', 'review', 'empty', 'expired', 'supplement_failed', 'not_due'):
+        for kind in ('missing_receipt', 'checksum', 'review', 'empty', 'expired', 'supplement_failed', 'not_due'):
             changed, results, today = deepcopy(final), deepcopy(result), '2026-10-31'
+            if kind == 'missing_receipt': changed['snapshots'][0].pop('package_review')
             if kind == 'checksum': changed['snapshots'][0]['body_sha256'] = 'tampered'
             if kind == 'review': changed['snapshots'][0]['metadata']['reviewed_at'] += 1
             if kind == 'empty': changed['snapshots'][0]['active_entries'] = 0
@@ -87,6 +89,27 @@ class CalendarReleaseTests(unittest.TestCase):
             if kind == 'not_due': results['nbs']['synced_again'] = False
             with self.subTest(kind=kind):
                 self.assertEqual(release.source_acceptance(results, changed, today)['status'], 'needs_review')
+
+    def test_upgrade_checks_existing_events_and_each_immutable_revision(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            old, live = (Path(temporary)/name for name in ('old.db', 'live.db'))
+            with closing(sqlite3.connect(old)) as conn, closing(sqlite3.connect(live)) as dest:
+                conn.executescript("""CREATE TABLE calendar_events(id TEXT PRIMARY KEY,payload TEXT);
+                    CREATE TABLE calendar_revisions(event_id TEXT,version INTEGER,payload TEXT,saved_at INTEGER,PRIMARY KEY(event_id,version));
+                    INSERT INTO calendar_events VALUES('watched','{"version":1}');
+                    INSERT INTO calendar_revisions VALUES('watched',1,'{"version":1}',100);""")
+                conn.backup(dest)
+                dest.executescript("""UPDATE calendar_events SET payload='{"version":2}';
+                    INSERT INTO calendar_revisions VALUES('watched',2,'{"version":2}',200);""")
+                self.assertEqual(release.verify_calendar_migration(old, live), {'status':'passed', 'events':1, 'revisions':1})
+                for sql in ("DELETE FROM calendar_events", "DELETE FROM calendar_revisions WHERE version=1",
+                            "UPDATE calendar_revisions SET saved_at=2 WHERE version=1"):
+                    with self.subTest(sql=sql):
+                        dest.execute(sql)
+                        dest.commit()
+                        with self.assertRaises(RuntimeError):
+                            release.verify_calendar_migration(old, live)
+                        conn.backup(dest)
 
     def test_successor_requires_finished_observation_and_runtime_evidence(self):
         run_id = 'calendar-release-20261030T105422Z-9819e472'

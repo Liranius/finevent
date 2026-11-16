@@ -3,7 +3,6 @@ package calendar
 import (
 	"crypto/sha256"
 	"database/sql"
-	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -11,9 +10,6 @@ import (
 	"regexp"
 	"strings"
 )
-
-//go:embed snapshots/bls.json snapshots/bls-*.tsv
-var blsSchedules embed.FS
 
 type blsRelease struct {
 	name, period, nyfedID string
@@ -45,10 +41,10 @@ var dolReportURL = regexp.MustCompile(`^https://www\.dol\.gov/newsroom/economicd
 
 func blsSnapshotFile(info SnapshotInfo) (string, error) {
 	if info.URL == fmt.Sprintf("https://www.bls.gov/schedule/%d/home.htm", info.Year) {
-		return fmt.Sprintf("snapshots/bls-%d.tsv", info.Year), nil
+		return fmt.Sprintf("bls-%d.tsv", info.Year), nil
 	}
 	if m := dolReportURL.FindStringSubmatch(info.URL); m != nil {
-		return "snapshots/bls-notice-" + m[1] + ".tsv", nil
+		return "bls-notice-" + m[1] + ".tsv", nil
 	}
 	return "", errors.New("BLS 快照的官方来源无效")
 }
@@ -60,7 +56,7 @@ func readBLSReleases(info SnapshotInfo, body []byte, now int64) ([]blsRelease, e
 	}
 	sum := sha256.Sum256(body)
 	digest := hex.EncodeToString(sum[:])
-	idPrefix := strings.TrimSuffix(strings.TrimPrefix(file, "snapshots/"), ".tsv")
+	idPrefix := strings.TrimSuffix(file, ".tsv")
 	if len(body) > 2*1024*1024 || info.SHA256 != digest || info.ID != idPrefix+"-"+digest[:12] ||
 		info.Format != "release-table" ||
 		info.RetrievedAt <= 0 || info.RetrievedAt > info.ReviewedAt || info.ReviewedAt > now {
@@ -115,36 +111,6 @@ func readBLSReleases(info SnapshotInfo, body []byte, now int64) ([]blsRelease, e
 		releases = append(releases, blsRelease{name, period, nyfedID, e})
 	}
 	return releases, nil
-}
-
-func (s *Store) importBundledBLS(now int64) error {
-	data, err := blsSchedules.ReadFile("snapshots/bls.json")
-	if err != nil {
-		return err
-	}
-	var manifest []SnapshotInfo
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return err
-	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	for _, info := range manifest {
-		file, err := blsSnapshotFile(info)
-		if err != nil {
-			return err
-		}
-		body, err := blsSchedules.ReadFile(file)
-		if err != nil {
-			return err
-		}
-		if err := importBLSTable(tx, info, body, now); err != nil {
-			return err
-		}
-	}
-	return tx.Commit()
 }
 
 func importBLSTable(tx *sql.Tx, info SnapshotInfo, body []byte, now int64) error {

@@ -258,12 +258,15 @@ def calendar_state(path=DATA/'finevent.db'):
         revisions = conn.execute('SELECT COUNT(*) FROM calendar_revisions').fetchone()[0]
         drafts = conn.execute('SELECT COUNT(*) FROM fund_drafts').fetchone()[0]
         snapshots = []
+        reviews = {}
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='calendar_package_reviews'").fetchone():
+            reviews = {row['id']: json.loads(row['metadata']) for row in conn.execute('SELECT id,metadata FROM calendar_package_reviews')}
         if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='calendar_snapshots'").fetchone():
             for row in conn.execute("SELECT id,source,metadata,body FROM calendar_snapshots ORDER BY id"):
                 info = json.loads(row['metadata'])
                 active = conn.execute("SELECT COUNT(*),MAX(json_extract(payload,'$.end')) FROM calendar_events WHERE json_extract(payload,'$.provenance.snapshot_id')=?", (row['id'],)).fetchone()
                 snapshots.append({'id': row['id'], 'source': row['source'], 'metadata': info,
-                                  'body_sha256': hashlib.sha256(row['body']).hexdigest(),
+                                  'body_sha256': hashlib.sha256(row['body']).hexdigest(), 'package_review': reviews.get(row['id']),
                                   'active_entries': active[0], 'active_coverage_end': active[1]})
         repairs = []
         if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='calendar_source_repairs'").fetchone():
@@ -271,6 +274,28 @@ def calendar_state(path=DATA/'finevent.db'):
         reminders = reminder_state(conn)
     return {'sources': sources, 'events': count, 'revisions': revisions, 'drafts': drafts,
             'events_sha256': digest.hexdigest(), 'snapshots': snapshots, 'repairs': repairs, 'reminders': reminders}
+
+
+def verify_calendar_migration(backup_path, live_path):
+    # The collector can append revisions during installation. Check each previous
+    # identity and immutable revision against the frozen backup in one read transaction.
+    with closing(readonly(live_path)) as conn:
+        conn.execute('ATTACH DATABASE ? AS previous', (backup_path.resolve().as_uri()+'?mode=ro',))
+        conn.execute('BEGIN')
+        if not conn.execute("SELECT 1 FROM previous.sqlite_master WHERE name='calendar_events'").fetchone():
+            return {'status': 'passed', 'events': 0, 'revisions': 0}
+        missing = conn.execute("""SELECT 1 FROM previous.calendar_events old
+            LEFT JOIN main.calendar_events e ON e.id=old.id
+            WHERE e.id IS NULL OR json_extract(e.payload,'$.version') < json_extract(old.payload,'$.version')
+            OR (json_extract(e.payload,'$.version') = json_extract(old.payload,'$.version') AND e.payload != old.payload)
+            LIMIT 1""").fetchone()
+        require(not missing, 'Existing calendar event lost or overwritten during migration')
+        missing = conn.execute("""SELECT 1 FROM previous.calendar_revisions old
+            LEFT JOIN main.calendar_revisions r ON r.event_id=old.event_id AND r.version=old.version
+            WHERE r.event_id IS NULL OR r.payload != old.payload OR r.saved_at != old.saved_at LIMIT 1""").fetchone()
+        require(not missing, 'Existing calendar revision lost or changed during migration')
+        return {'status': 'passed', 'events': conn.execute('SELECT count(*) FROM previous.calendar_events').fetchone()[0],
+                'revisions': conn.execute('SELECT count(*) FROM previous.calendar_revisions').fetchone()[0]}
 
 
 def verify_reminder_migration(before, after):
@@ -283,21 +308,27 @@ def verify_reminder_migration(before, after):
     return {'status': 'passed', 'before': before, 'after': after, 'device_delivery_verified': False}
 
 
-def snapshot_manifest():
-    bundled = Path(__file__).with_name('calendar-snapshot.json')
-    if not bundled.is_file():
-        bundled = Path(__file__).resolve().parent.parent/'apps/server/internal/calendar/snapshots/nbs-2026.json'
-    return json.loads(bundled.read_text(encoding='utf-8-sig'))
+# Pin only the reviewed metadata digest for installations predating package receipts.
+# New evidence is checked against the operator-imported review in the data database.
+LEGACY_NBS_REVIEW = 'e9b65e11d8d895b4477a436ed9fb5648e83b07e332567e9d9c44309326e2cdbc'
+NBS_REVIEW_FIELDS = ('id', 'url', 'year', 'entries', 'retrieved_at', 'reviewed_at', 'sha256')
+
+
+def reviewed_nbs(snapshot, today):
+    if snapshot['source'] != 'nbs':
+        return False
+    meta = snapshot['metadata']
+    fields = {k: meta.get(k) for k in NBS_REVIEW_FIELDS}
+    pinned = hashlib.sha256(json.dumps(fields, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    receipt = snapshot.get('package_review') or {}
+    return (snapshot['id'] == fields['id'] and snapshot['body_sha256'] == fields['sha256']
+            and (pinned == LEGACY_NBS_REVIEW or all(k in receipt and fields[k] == receipt[k] for k in fields))
+            and snapshot['active_entries'] > 0 and (snapshot['active_coverage_end'] or '')[:10] >= today)
 
 
 def source_acceptance(results, final, today):
-    expected = snapshot_manifest()
     snapshots = final.get('snapshots', [])
-    reviewed = any(s['source'] == 'nbs' and s['id'] == expected['id']
-                   and s['body_sha256'] == expected['sha256']
-                   and all(s['metadata'].get(k) == v for k, v in expected.items())
-                   and s['active_entries'] > 0 and (s['active_coverage_end'] or '')[:10] >= today
-                   for s in snapshots)
+    reviewed = any(reviewed_nbs(s, today) for s in snapshots)
     healthy = lambda key: results[key]['healthy'] and results[key]['synced_again']
     good = (set(results) == SOURCE_IDS and all(r['synced_again'] for r in results.values())
             and all(healthy(k) for k in REQUIRED_HEALTHY_SOURCES)
@@ -670,6 +701,7 @@ def verify_installed(directory, report, backup, transition):
     report['stage'] = 'initial_calendar'
     recovery.save(directory/'report.json', report)
     report['initial_calendar'] = wait_initial_sources(directory, report, current)
+    report['calendar_migration'] = verify_calendar_migration(backup/'database.db', DATA/'finevent.db')
     with closing(readonly(backup/'database.db')) as old_db:
         report['reminder_migration'] = verify_reminder_migration(
             reminder_state(old_db), report['initial_calendar']['reminders'])

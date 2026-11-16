@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ func TestFollowedBenchmarkKeepsReminderScheduleAcrossSources(t *testing.T) {
 		}
 	}
 	assertJobs(2, 0)
-	if err := s.ImportBundledSnapshot(); err != nil {
+	if err := s.ImportCalendarPackage(os.DirFS("../calendar/testdata"), time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	assertJobs(2, 0)
@@ -98,7 +99,7 @@ func TestBLSUploadRequiresSessionOriginAndBoundedFile(t *testing.T) {
 func TestOfficialSnapshotDownloadRequiresSessionAndDoesNotRenderHTML(t *testing.T) {
 	a := testApp(t)
 	s := &calendar.Store{DB: a.Store.DB}
-	if err := s.ImportBundledSnapshot(); err != nil {
+	if err := s.ImportCalendarPackage(os.DirFS("../calendar/testdata"), time.Now().Unix()); err != nil {
 		t.Fatal(err)
 	}
 	sources, err := s.Sources()
@@ -138,7 +139,7 @@ func TestOfficialSnapshotDownloadRequiresSessionAndDoesNotRenderHTML(t *testing.
 		}
 		counts[e.Source]++
 	}
-	if counts["nbs"] != 4 || counts["bls"] != 10 {
+	if counts["nbs"] != 4 || counts["bls"] != 1 {
 		t.Fatal(counts)
 	}
 	for _, source := range result.Sources {

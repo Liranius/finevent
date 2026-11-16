@@ -7,7 +7,7 @@ status: accepted
 decided: '2026-11-16'
 sources:
   - apps/server/internal/calendar/bls_schedule.go
-  - apps/server/internal/calendar/snapshots/README.md
+  - docs/calendar-package.md
   - docs/calendar-api.md
 tags:
   - decision
@@ -25,7 +25,7 @@ BLS 日历的直接请求持续收到 403。纽约联储可以同步近期常见
 - [decision] 年表给出已公布日程的覆盖面，纽约联储持续更新近期可明确识别的指标。具备明确统计期的劳工部公告和 BLS 主源可更新同一事件。
 - [rationale] 仅用纽约联储会漏掉不在其覆盖范围内的发布；仅依赖年表无法及时获知临时改期。正文和发布时刻均应可追溯。
 - [decision] 取得 BLS 的 ICS 时，可在应用预览并确认变更。保留原文件、事件修订和自动同步的真实状态，文件缺项保留原记录。接口见 `docs/calendar-api.md`。
-- [consequence] 只有年表网页或公告 PDF 时，仍可核对并更新随程序发布的摘录。维护入口见 `apps/server/internal/calendar/snapshots/README.md`。
+- [consequence] 只有年表网页或公告 PDF 时，仍可核对并更新独立数据包中的摘录。维护入口见 `docs/calendar-package.md`。
 
 ## Relations
 

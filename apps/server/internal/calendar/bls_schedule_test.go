@@ -8,14 +8,14 @@ import (
 	"testing"
 )
 
-func TestBundledBLSAnnualTablesPreserveFailureAndReleaseScope(t *testing.T) {
+func TestPackageBLSAnnualTablesPreserveFailureAndReleaseScope(t *testing.T) {
 	s := testStore(t)
 	const now = 1800000000
 	if err := s.Import("bls", nil, now, errors.New("HTTP 403")); err != nil {
 		t.Fatal(err)
 	}
 	for range 2 {
-		if err := s.importBundledBLS(now); err != nil {
+		if err := s.importBLSTestPackage(t, now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -29,10 +29,10 @@ func TestBundledBLSAnnualTablesPreserveFailureAndReleaseScope(t *testing.T) {
 		}
 	}
 	var count, revisions int
-	if err := s.DB.QueryRow(`SELECT count(*) FROM calendar_events`).Scan(&count); err != nil || count != 308 {
+	if err := s.DB.QueryRow(`SELECT count(*) FROM calendar_events`).Scan(&count); err != nil || count != 11 {
 		t.Fatal(count, err)
 	}
-	if err := s.DB.QueryRow(`SELECT count(*) FROM calendar_revisions`).Scan(&revisions); err != nil || revisions != 309 {
+	if err := s.DB.QueryRow(`SELECT count(*) FROM calendar_revisions`).Scan(&revisions); err != nil || revisions != 12 {
 		t.Fatal(revisions, err)
 	}
 	day, err := s.List("2027-08-26", "2027-08-26")
@@ -54,7 +54,7 @@ func TestBundledBLSAnnualTablesPreserveFailureAndReleaseScope(t *testing.T) {
 		t.Fatal(day, err)
 	}
 	day, err = s.List("2026-12-04", "2026-12-04")
-	if err != nil || len(day) != 1 || !strings.HasPrefix(day[0].URL, "https://www.dol.gov/") {
+	if err != nil || len(day) != 1 || day[0].Start != "2026-12-04T09:30:00-05:00" || !strings.HasPrefix(day[0].URL, "https://www.dol.gov/") {
 		t.Fatal(day, err)
 	}
 }
@@ -85,7 +85,7 @@ func TestBLSSnapshotKeepsNYFedIdentityAcrossSourcesAndCancellation(t *testing.T)
 					t.Fatal(err)
 				}
 			}
-			if err := s.importBundledBLS(1800000000); err != nil {
+			if err := s.importBLSTestPackage(t, 1800000000); err != nil {
 				t.Fatal(err)
 			}
 			var id string
@@ -124,7 +124,7 @@ func TestBLSSnapshotKeepsNYFedIdentityAcrossSourcesAndCancellation(t *testing.T)
 			if err := s.Import("nyfed", []Event{fed}, 1800000004, nil); err != nil {
 				t.Fatal(err)
 			}
-			if err := s.importBundledBLS(1800000005); err != nil {
+			if err := s.importBLSTestPackage(t, 1800000005); err != nil {
 				t.Fatal(err)
 			}
 			got, err = s.Get(id)
@@ -132,7 +132,7 @@ func TestBLSSnapshotKeepsNYFedIdentityAcrossSourcesAndCancellation(t *testing.T)
 				t.Fatal(got, err)
 			}
 			var n int
-			if err := s.DB.QueryRow(`SELECT count(*) FROM calendar_events`).Scan(&n); err != nil || n != 308 {
+			if err := s.DB.QueryRow(`SELECT count(*) FROM calendar_events`).Scan(&n); err != nil || n != 11 {
 				t.Fatal(n, err)
 			}
 		})
@@ -148,7 +148,7 @@ func TestReviewedDOLRescheduleRetainsBenchmarkAndRejectsBadBatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.importBundledBLS(now); err != nil {
+	if err := s.importBLSTestPackage(t, now); err != nil {
 		t.Fatal(err)
 	}
 	body := []byte("date_et\ttime_et\trelease\treference_period\n2027-09-01\t10:00\t" + nationalBenchmark + "\tMarch 2027\n")
@@ -181,7 +181,7 @@ func TestReviewedDOLRescheduleRetainsBenchmarkAndRejectsBadBatch(t *testing.T) {
 func TestNYFedMonthWithoutReferencePeriodCannotMergeDistinctReleases(t *testing.T) {
 	s := testStore(t)
 	const now = 1800000000
-	if err := s.importBundledBLS(now); err != nil {
+	if err := s.importBLSTestPackage(t, now); err != nil {
 		t.Fatal(err)
 	}
 	for _, day := range []string{"14", "30"} {
@@ -202,7 +202,7 @@ func TestNYFedMonthWithoutReferencePeriodCannotMergeDistinctReleases(t *testing.
 func TestStaleNYFedMonthAfterOfficialReschedule(t *testing.T) {
 	s := testStore(t)
 	const now = 1800000000
-	if err := s.importBundledBLS(now); err != nil {
+	if err := s.importBLSTestPackage(t, now); err != nil {
 		t.Fatal(err)
 	}
 	body := []byte("date_et\ttime_et\trelease\treference_period\n2026-12-02\t08:30\tEmployment Situation\tOctober 2026\n")
@@ -226,7 +226,7 @@ func TestStaleNYFedMonthAfterOfficialReschedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	var total int
-	if err := s.DB.QueryRow(`SELECT count(*) FROM calendar_events`).Scan(&total); err != nil || total != 308 {
+	if err := s.DB.QueryRow(`SELECT count(*) FROM calendar_events`).Scan(&total); err != nil || total != 11 {
 		t.Fatal(total, err)
 	}
 	day, err := s.List("2026-12-02", "2026-12-02")

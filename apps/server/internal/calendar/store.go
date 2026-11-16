@@ -70,6 +70,7 @@ CREATE INDEX IF NOT EXISTS calendar_range ON calendar_events(start_day,end_day);
 CREATE TABLE IF NOT EXISTS calendar_revisions(event_id TEXT NOT NULL REFERENCES calendar_events(id), version INTEGER NOT NULL, payload TEXT NOT NULL, saved_at INTEGER NOT NULL, PRIMARY KEY(event_id,version));
 CREATE TABLE IF NOT EXISTS calendar_sources(id TEXT PRIMARY KEY, last_attempt INTEGER NOT NULL DEFAULT 0, last_success INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '', count INTEGER NOT NULL DEFAULT 0, coverage_end TEXT NOT NULL DEFAULT '');
 CREATE TABLE IF NOT EXISTS fund_drafts(id TEXT PRIMARY KEY, payload TEXT NOT NULL, created INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS calendar_package_reviews(id TEXT PRIMARY KEY REFERENCES calendar_snapshots(id), metadata TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS calendar_snapshots(id TEXT PRIMARY KEY, source TEXT NOT NULL, metadata TEXT NOT NULL, body BLOB NOT NULL);
 CREATE TABLE IF NOT EXISTS calendar_bls_releases(name TEXT NOT NULL, period TEXT NOT NULL, event_id TEXT NOT NULL UNIQUE REFERENCES calendar_events(id), nyfed_id TEXT NOT NULL, release_day TEXT NOT NULL, PRIMARY KEY(name,period));
 CREATE INDEX IF NOT EXISTS calendar_bls_nyfed ON calendar_bls_releases(nyfed_id);

@@ -139,7 +139,7 @@ test('官方快照：主源未恢复、核对时间、原文下载及窄屏键�
   // The official fixture is November 2026; month navigation must not depend on today's date.
   await page.clock.setFixedTime(new Date('2026-10-31T04:00:00Z'));
   await login(page);
-  await expect(page.getByRole('status')).toContainText('355 项日程来自已核对的官方快照');
+  await expect(page.getByRole('status')).toContainText('58 项日程来自已核对的官方快照');
   const response = await page.request.get('api/v1/calendar?from=2026-11-01&to=2026-11-30');
   const data = await response.json();
   const source = data.sources.find((item: { id: string }) => item.id === 'nbs');

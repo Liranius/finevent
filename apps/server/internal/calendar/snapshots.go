@@ -1,16 +1,14 @@
 package calendar
 
 import (
-	"bytes"
-	"compress/gzip"
 	"crypto/sha256"
 	"database/sql"
-	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
-	"time"
+	"fmt"
+	"net/url"
+	"strings"
 )
 
 type Provenance struct {
@@ -38,56 +36,26 @@ type SnapshotInfo struct {
 	CoverageEnd     string `json:"coverage_end"`
 }
 
-//go:embed snapshots/nbs-2026.html.gz
-var nbsSnapshot []byte
-
-//go:embed snapshots/nbs-2026.json
-var nbsSnapshotMetadata []byte
-
-func bundledSnapshot() (SnapshotInfo, []byte, error) {
-	var info SnapshotInfo
-	if err := json.Unmarshal(nbsSnapshotMetadata, &info); err != nil {
-		return info, nil, err
-	}
-	r, err := gzip.NewReader(bytes.NewReader(nbsSnapshot))
-	if err != nil {
-		return info, nil, err
-	}
-	defer r.Close()
-	body, err := io.ReadAll(io.LimitReader(r, 2*1024*1024+1))
-	return info, body, err
-}
-
-func (s *Store) ImportBundledSnapshot() error {
-	info, body, err := bundledSnapshot()
-	if err != nil {
-		return err
-	}
-	now := time.Now().Unix()
-	if err := s.importSnapshot(info, body, now); err != nil {
-		return err
-	}
-	return s.importBundledBLS(now)
-}
-
-func (s *Store) importSnapshot(info SnapshotInfo, body []byte, now int64) error {
+func importNBSSnapshot(tx *sql.Tx, info SnapshotInfo, body []byte, now int64) error {
 	sum := sha256.Sum256(body)
-	if len(body) > 2*1024*1024 || hex.EncodeToString(sum[:]) != info.SHA256 || info.ID != "nbs-2026-"+info.SHA256[:12] || info.Year != 2026 ||
-		info.RetrievedAt <= 0 || info.ReviewedAt < info.RetrievedAt || info.ReviewedAt > now || info.URL != "https://www.stats.gov.cn/xw/tjxw/tzgg/202512/t20251224_1962137.html" {
+	u, err := url.Parse(info.URL)
+	if err != nil || u.Scheme != "https" || u.Host != "www.stats.gov.cn" || u.User != nil || !strings.HasSuffix(u.Path, ".html") ||
+		len(body) > maxSnapshotBytes || hex.EncodeToString(sum[:]) != info.SHA256 || info.ID != fmt.Sprintf("nbs-%d-%x", info.Year, sum[:6]) ||
+		info.Format != "" || info.RetrievedAt <= 0 || info.ReviewedAt < info.RetrievedAt || info.ReviewedAt > now {
 		return errors.New("官方快照身份或核对记录无效")
 	}
 	events, err := Parse("nbs", info.URL, string(body), info.Year)
 	if err != nil {
 		return err
 	}
-	if len(events) != info.Entries || info.Entries != 47 {
+	if len(events) != info.Entries || info.Entries < 1 {
 		return errors.New("官方快照条数不符")
 	}
-	tx, err := s.DB.Begin()
-	if err != nil {
-		return err
+	for _, e := range events {
+		if !strings.HasPrefix(e.SourceID, fmt.Sprintf("%d:", info.Year)) {
+			return errors.New("官方快照年份与正文不符")
+		}
 	}
-	defer tx.Rollback()
 	var exists int
 	if err = tx.QueryRow(`SELECT COUNT(*) FROM calendar_snapshots WHERE id=?`, info.ID).Scan(&exists); err != nil {
 		return err
@@ -133,7 +101,7 @@ func (s *Store) importSnapshot(info SnapshotInfo, body []byte, now int64) error 
 		return err
 	}
 	// Deliberately do not update calendar_sources: this is not a successful live poll.
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) snapshotInfo(source string) ([]SnapshotInfo, error) {

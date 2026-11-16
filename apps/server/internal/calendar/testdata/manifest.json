@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "snapshots": [
+    {
+      "source": "nbs",
+      "file": "nbs.html",
+      "id": "nbs-2026-55ceff8ff9c2",
+      "url": "https://www.stats.gov.cn/xw/tjxw/tzgg/202512/t20251224_1962137.html",
+      "retrieved_at": 1793366012,
+      "reviewed_at": 1793366184,
+      "sha256": "55ceff8ff9c2354a78bafb17cd0f0dbc2247d92ac39c6fa69a9ae54f338ba6d2",
+      "entries": 47,
+      "year": 2026
+    },
+    {
+      "source": "bls",
+      "file": "bls-2026.tsv",
+      "id": "bls-2026-52153063e924",
+      "year": 2026,
+      "url": "https://www.bls.gov/schedule/2026/home.htm",
+      "retrieved_at": 1794814768,
+      "reviewed_at": 1794814768,
+      "sha256": "52153063e9241f1481248a0a2a6e6ff8e302d91703b6aa9ef8ae3e88e496dab5",
+      "entries": 7,
+      "format": "release-table"
+    },
+    {
+      "source": "bls",
+      "file": "bls-2027.tsv",
+      "id": "bls-2027-01fdcd6ce568",
+      "year": 2027,
+      "url": "https://www.bls.gov/schedule/2027/home.htm",
+      "retrieved_at": 1794814768,
+      "reviewed_at": 1794814768,
+      "sha256": "01fdcd6ce5682a60f7f513f638f01a9b0e97ca7e6462a9ebb0b889e42e6f71a7",
+      "entries": 4,
+      "format": "release-table"
+    },
+    {
+      "source": "bls",
+      "file": "bls-notice-11062026.tsv",
+      "id": "bls-notice-11062026-ba073ad7d456",
+      "year": 2026,
+      "url": "https://www.dol.gov/newsroom/economicdata/empsit_11062026.pdf",
+      "retrieved_at": 1794815083,
+      "reviewed_at": 1794815083,
+      "sha256": "ba073ad7d456abbc6490485bb79ba48f9050d6b8e493d8316c1507de5da3b174",
+      "entries": 1,
+      "format": "release-table"
+    }
+  ]
+}
