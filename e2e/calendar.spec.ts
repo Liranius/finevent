@@ -9,6 +9,65 @@ async function login(page: Page) {
   await expect(page.getByRole('heading', { name: '财经日历', exact: true })).toBeVisible();
 }
 
+for (const width of [1280, 393]) {
+  test(`零售销售详情保留来源和时间精度（${width}px）`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 852 });
+    const annual = {
+      id: 'annual-retail',
+      source: 'omb',
+      source_id: 'advance-retail:2026-12',
+      title: '美国零售销售（初值）',
+      kind: 'macro',
+      status: 'scheduled',
+      importance: 3,
+      conditions: '',
+      fund_code: '',
+      evidence: 'OMB 年表公布的日期',
+      updated_at: 1,
+      timezone: 'America/New_York',
+      start: '2027-01-15',
+      end: '2027-01-15',
+      precision: 'date',
+      url: 'https://www.whitehouse.gov/wp-content/uploads/2026/10/FY2027-PFEI.pdf',
+      version: 1,
+    };
+    const recent = {
+      ...annual,
+      id: 'recent-retail',
+      source: 'nyfed',
+      source_id: 'advance-retail:2026-10',
+      start: '2026-11-17T08:30:00-05:00',
+      end: '2026-11-17T08:30:00-05:00',
+      precision: 'minute',
+      url: 'https://www.newyorkfed.org/research/calendars/i-nov26.html',
+      provenance: {
+        mode: 'supplement',
+        authority_url: 'https://www.census.gov/retail/marts/www/marts_current.pdf',
+      },
+    };
+    for (const event of [annual, recent]) {
+      await page.route(`**/api/v1/calendar/${event.id}`, (route) =>
+        route.fulfill({ json: { event, revisions: [] } }),
+      );
+    }
+    await login(page);
+    await page.goto('./#/calendar/events/annual-retail');
+    await expect(page.getByText('2027-01-15 · 仅日期', { exact: true })).toBeVisible();
+    await expect(page.getByRole('link', { name: '查看原文 ↗' })).toHaveAttribute(
+      'href',
+      annual.url,
+    );
+    await page.goto('./#/calendar/events/recent-retail');
+    await expect(page.getByText(/21:30 · 北京时间/)).toBeVisible();
+    const authority = page.getByRole('link', { name: '查看 Census 零售销售报告 ↗' });
+    await authority.focus();
+    await expect(authority).toBeFocused();
+    await expect(authority).toHaveAttribute('href', recent.provenance.authority_url);
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('link', { name: '查看原文 ↗' })).toBeFocused();
+  });
+}
+
 test('基金：草稿持久化、人工确认、区间修改与取消', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 393, height: 852 });
   await login(page);
@@ -75,7 +134,11 @@ test('日历：补录时刻、月份切换、日期选择、窄屏议程', async
   await page.getByRole('button', { name: '议程', exact: true }).click();
   await page.getByRole('link', { name: '设置', exact: true }).click();
   await page.getByRole('link', { name: '日历官方来源', exact: true }).click();
-  await page.getByText('官方来源 · 7 项待核查', { exact: true }).click();
+  await page.getByText('官方来源 · 8 项待核查', { exact: true }).click();
+  await expect(page.getByRole('link', { name: '白宫管理和预算办公室' })).toHaveAttribute(
+    'href',
+    'https://www.whitehouse.gov/omb/information-resources/guidance/us-principal-federal-economic-indicators/',
+  );
   await expect(page.getByRole('link', { name: '美国人口普查局' })).toHaveAttribute(
     'href',
     'https://www.census.gov/retail/release_schedule.html',

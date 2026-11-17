@@ -750,12 +750,19 @@ onUnmounted(() => {
           </div>
           <div v-else-if="detail.event.provenance?.mode === 'supplement'" class="snapshot-record">
             <strong>纽约联储补充来源</strong>
-            <p class="caption">日程转引自纽约联储，覆盖不完整，不表示 BLS 主源恢复。</p>
+            <p v-if="detail.event.source_id.startsWith('advance-retail:')" class="caption">
+              近期零售销售初值的发布时刻来自纽约联储月历。
+            </p>
+            <p v-else class="caption">日程转引自纽约联储，覆盖不完整，不表示 BLS 主源恢复。</p>
             <a
               :href="detail.event.provenance.authority_url"
               target="_blank"
               rel="noopener noreferrer"
-              >查看 BLS 指标页面 ↗</a
+              >{{
+                detail.event.source_id.startsWith('advance-retail:')
+                  ? '查看 Census 零售销售报告 ↗'
+                  : '查看 BLS 指标页面 ↗'
+              }}</a
             >
           </div>
           <a :href="detail.event.url" target="_blank" rel="noopener noreferrer">{{

@@ -41,8 +41,9 @@ func Sources() []Source {
 		{ID: "fomc", Name: "美联储 FOMC", URL: "https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm"},
 		{ID: "bls", Name: "美国 BLS", URL: blsICSURL},
 		{ID: "bea", Name: "美国 BEA", URL: "https://www.bea.gov/news/schedule"},
-		{ID: "nyfed", Name: "纽约联储 · BLS 补充", URL: nyfedURL, Mode: "supplement", Note: nyfedNote},
 		{ID: "census", Name: "美国人口普查局", URL: censusRetailURL},
+		{ID: "omb", Name: "白宫管理和预算办公室", URL: ombURL, Mode: "supplement", Note: "年度零售销售初值日程，仅提供日期。"},
+		{ID: "nyfed", Name: "纽约联储", URL: nyfedURL, Mode: "supplement", Note: nyfedNote},
 		{ID: "dol", Name: "美国劳工部", URL: dolClaimsURL},
 	}
 }
@@ -91,7 +92,9 @@ func (s *Store) SyncDue(ctx context.Context, client *http.Client) error {
 		}
 		body, fetchErr := Fetch(ctx, client, source.URL)
 		var events []Event
-		if fetchErr == nil {
+		if source.ID == "omb" {
+			events, fetchErr = fetchOMB(ctx, client, body, fetchErr, time.Now().Year())
+		} else if fetchErr == nil {
 			if source.ID == "nbs" {
 				var links []string
 				links, fetchErr = nbsLinks(body, time.Now().Year())

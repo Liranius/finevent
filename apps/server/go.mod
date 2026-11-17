@@ -4,6 +4,7 @@ go 1.26.3
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
+	github.com/ledongthuc/pdf v0.0.0-20261020125853-5e46805f718e
 	golang.org/x/crypto v0.58.0
 	golang.org/x/net v0.62.0
 	golang.org/x/term v0.47.0

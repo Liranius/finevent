@@ -43,11 +43,11 @@ PATCH = Path('/srv/example/finevent-host/trendradar/client.py')
 PARENT = Path('/sys/fs/cgroup/trendradar.slice')
 LOCK = Path('/run/lock/finevent-memory-recovery.lock')
 ID_PATTERN = re.compile(r'calendar-release-\d{8}T\d{6}Z-[a-f0-9]{8}')
-REQUIRED_HEALTHY_SOURCES = {'fomc', 'bea', 'nyfed', 'census', 'dol'}
-SOURCE_IDS = REQUIRED_HEALTHY_SOURCES | {'nbs', 'bls'}
+REQUIRED_HEALTHY_SOURCES = {'fomc', 'bea', 'nyfed', 'omb', 'dol'}
+SOURCE_IDS = REQUIRED_HEALTHY_SOURCES | {'nbs', 'bls', 'census'}
 OBSERVATION_SECONDS = 6*3600+15*60
-# Allow ten serial one-minute requests plus time for parsing and importing.
-INITIAL_SYNC_SECONDS = 12*60
+# OMB adds an index and up to two annual PDFs to the serial source checks.
+INITIAL_SYNC_SECONDS = 15*60
 ZONE = ZoneInfo('Asia/Shanghai')
 
 def require(condition, message):
@@ -295,9 +295,17 @@ def calendar_state(path=DATA/'finevent.db'):
         repairs = []
         if conn.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='calendar_source_repairs'").fetchone():
             repairs = [dict(row) for row in conn.execute('SELECT * FROM calendar_source_repairs ORDER BY id')]
+        retail = []
+        if conn.execute("SELECT 1 FROM sqlite_master WHERE name='calendar_retail_schedule'").fetchone():
+            retail = [dict(row) for row in conn.execute("""
+                SELECT s.source,s.period,s.release_day,e.start_day,json_extract(e.payload,'$.precision') AS precision
+                FROM calendar_retail_schedule s JOIN calendar_events e ON e.source_id='advance-retail:'||s.period
+                WHERE s.source IN ('omb','nyfed') AND e.source IN ('census','nyfed','omb')
+                AND json_extract(e.payload,'$.status') != 'cancelled' ORDER BY s.source,s.period""")]
         reminders = reminder_state(conn)
     return {'sources': sources, 'events': count, 'revisions': revisions, 'drafts': drafts,
-            'events_sha256': digest.hexdigest(), 'snapshots': snapshots, 'repairs': repairs, 'reminders': reminders}
+            'events_sha256': digest.hexdigest(), 'snapshots': snapshots, 'repairs': repairs, 'reminders': reminders,
+            'retail': retail}
 
 
 def verify_calendar_migration(backup_path, live_path):
@@ -354,10 +362,21 @@ def source_acceptance(results, final, today):
     snapshots = final.get('snapshots', [])
     reviewed = any(reviewed_nbs(s, today) for s in snapshots)
     healthy = lambda key: results[key]['healthy'] and results[key]['synced_again']
+    retail = final.get('retail', [])
+    annual_months = {r['release_day'][:7] for r in retail if r['source'] == 'omb'}
+    month = datetime.fromisoformat(today).date().replace(day=1)
+    next_month = (month + timedelta(days=32)).replace(day=1)
+    recent = any(r['source'] == 'nyfed' and r['precision'] == 'minute'
+                 and r['release_day'] == r['start_day']
+                 and r['release_day'][:7] in (month.isoformat()[:7], next_month.isoformat()[:7]) for r in retail)
+    covered = (recent and all(f'{month.year}-{m:02d}' in annual_months for m in range(1, 13)))
+    census_blocked = results.get('census', {}).get('latest', {}).get('error') == '官方来源返回 HTTP 403'
     good = (set(results) == SOURCE_IDS and all(r['synced_again'] for r in results.values())
             and all(healthy(k) for k in REQUIRED_HEALTHY_SOURCES)
-            and (healthy('nbs') or reviewed))
+            and (healthy('nbs') or reviewed) and (healthy('census') or (census_blocked and covered)))
     limits = ['NYFed covers selected BLS events in current/next published month, not the complete BLS calendar.']
+    if census_blocked:
+        limits.append('Census returned HTTP 403; OMB supplies annual dates and NYFed supplies near-term retail release times.')
     if not results['bls']['healthy']:
         limits.append('BLS primary synchronization remains unavailable; its error is retained.')
     if any(s['source'] == 'nbs' and s['active_entries'] for s in snapshots):
@@ -367,7 +386,7 @@ def source_acceptance(results, final, today):
     if any(s['source'] == 'bls' and s['active_entries'] and s['metadata'].get('format') == 'ics' for s in snapshots):
         limits.append('Some BLS entries use a manually imported ICS file.')
     return {'status': 'accepted_with_source_limits' if good else 'needs_review',
-            'nbs_snapshot_available': reviewed, 'snapshots': snapshots, 'limitations': limits}
+            'retail_supplements_verified': covered, 'nbs_snapshot_available': reviewed, 'snapshots': snapshots, 'limitations': limits}
 
 
 def resource_checks_passed(report):
@@ -417,11 +436,18 @@ def validate_previous(report, run_id, active_release, trend_review=None):
     # Observer deadline uses integer epoch seconds; ISO start retains fractions.
     require(finished-started >= OBSERVATION_SECONDS-1, 'Previous calendar observation has not completed')
     results = report.get('calendar', {})
+    acceptance = report.get('source_acceptance', {})
     require({'nbs', 'bls', 'fomc', 'bea'} <= set(results)
-            and (not {'census', 'dol'}.intersection(results) or SOURCE_IDS <= set(results))
+            and (not {'census', 'dol', 'omb'}.intersection(results) or SOURCE_IDS - {'omb'} <= set(results))
+            and ('retail_supplements_verified' not in acceptance or 'omb' in results)
             and all(r.get('synced_again') for r in results.values())
             and all(results[k].get('healthy') for k in REQUIRED_HEALTHY_SOURCES.intersection(results)),
             'Previous operation has issues beyond the reviewed source limitations')
+    if 'census' in results and not results['census'].get('healthy'):
+        require('omb' in results and acceptance.get('status') == 'accepted_with_source_limits'
+                and acceptance.get('retail_supplements_verified') is True
+                and results['census'].get('latest', {}).get('error') == '官方来源返回 HTTP 403',
+                'Previous Census failure lacks verified retail coverage')
 
 
 def review_previous(run_id):
@@ -575,7 +601,7 @@ def wait_initial_sources(directory, report, current):
             recovery.save(directory/'report.json', report)
             return state
         time.sleep(5)
-    raise RuntimeError('Initial calendar synchronization did not finish within twelve minutes')
+    raise RuntimeError('Initial calendar synchronization did not finish within fifteen minutes')
 
 
 def check_sample(row, baseline):

@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS calendar_snapshots(id TEXT PRIMARY KEY, source TEXT N
 CREATE TABLE IF NOT EXISTS calendar_bls_releases(name TEXT NOT NULL, period TEXT NOT NULL, event_id TEXT NOT NULL UNIQUE REFERENCES calendar_events(id), nyfed_id TEXT NOT NULL, release_day TEXT NOT NULL, PRIMARY KEY(name,period));
 CREATE INDEX IF NOT EXISTS calendar_bls_nyfed ON calendar_bls_releases(nyfed_id);
 CREATE TABLE IF NOT EXISTS calendar_bls_aliases(source TEXT NOT NULL, source_id TEXT NOT NULL, event_id TEXT NOT NULL REFERENCES calendar_events(id), PRIMARY KEY(source,source_id));
+CREATE TABLE IF NOT EXISTS calendar_retail_schedule(source TEXT NOT NULL, period TEXT NOT NULL, release_day TEXT NOT NULL, PRIMARY KEY(source,period));
 CREATE TABLE IF NOT EXISTS calendar_source_repairs(id TEXT PRIMARY KEY, source TEXT NOT NULL, previous_state TEXT NOT NULL, requested_at INTEGER NOT NULL);`)
 	return err
 }
@@ -248,6 +249,9 @@ func revisionStatus(old, next Event) string {
 
 func scheduleMoved(old, next Event) bool {
 	if old.Precision != next.Precision {
+		if old.Precision == "date" && next.Precision == "minute" && strings.HasPrefix(old.SourceID, retailPrefix) && old.SourceID == next.SourceID {
+			return old.Start != next.Start[:10]
+		}
 		return true
 	}
 	if next.Precision == "date" {
@@ -299,11 +303,29 @@ func (s *Store) Import(source string, events []Event, now int64, fetchErr error)
 		_, err = tx.Exec(`INSERT INTO calendar_sources(id,last_attempt,error) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,error=excluded.error`, source, now, fetchErr.Error())
 	} else {
 		end := ""
+		count := 0
+		retailMonths := make(map[string]int)
+		if source == "nyfed" || source == "census" || source == "omb" {
+			if _, err = tx.Exec("DELETE FROM calendar_retail_schedule WHERE source=?", source); err != nil {
+				return err
+			}
+			for _, e := range events {
+				if e.Source == "nyfed" && strings.HasPrefix(e.SourceID, retailPrefix) && len(e.Start) >= 7 {
+					retailMonths[e.Start[:7]]++
+				}
+			}
+		}
 		for _, e := range events {
 			if e.Source != source {
 				return errors.New("source mismatch")
 			}
-			if source == "bls" || source == "nyfed" {
+			if (source == "census" || source == "nyfed" || source == "omb") && strings.HasPrefix(e.SourceID, retailPrefix) {
+				var matched bool
+				matched, err = saveRetail(tx, e, retailMonths, now)
+				if err == nil && !matched {
+					continue
+				}
+			} else if source == "bls" || source == "nyfed" {
 				err = saveLiveBLSRelease(tx, e, now)
 			} else {
 				_, err = save(tx, e, -1, now)
@@ -311,12 +333,13 @@ func (s *Store) Import(source string, events []Event, now int64, fetchErr error)
 			if err != nil {
 				return err
 			}
+			count++
 			_, d := e.Days()
 			if d > end {
 				end = d
 			}
 		}
-		_, err = tx.Exec(`INSERT INTO calendar_sources VALUES(?,?,?,'',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,error='',count=excluded.count,coverage_end=excluded.coverage_end`, source, now, now, len(events), end)
+		_, err = tx.Exec(`INSERT INTO calendar_sources VALUES(?,?,?,'',?,?) ON CONFLICT(id) DO UPDATE SET last_attempt=excluded.last_attempt,last_success=excluded.last_success,error='',count=excluded.count,coverage_end=excluded.coverage_end`, source, now, now, count, end)
 	}
 	if err != nil {
 		return err

@@ -82,6 +82,7 @@ export const sourceNames: Record<string, string> = {
   bea: 'BEA',
   nyfed: '纽约联储',
   census: '美国人口普查局',
+  omb: '白宫 OMB',
   dol: '美国劳工部',
   fund: '基金公告',
   manual: '手工补录',
