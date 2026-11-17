@@ -14,7 +14,7 @@ import (
 )
 
 const nyfedURL = "https://www.newyorkfed.org/research/calendars/nationalecon_cal"
-const nyfedNote = "补充当前及下一已发布月份中的 BLS 关键事件，非完整 BLS 日程；不表示 BLS 主源恢复。"
+const nyfedNote = "补充当前及下一已发布月份中的 BLS 关键事件和零售销售初值。"
 
 func nyfedMonth(root *html.Node) (time.Time, error) {
 	n := first(root, func(n *html.Node) bool { return hasClass(n, "ts-data-table-head") })
@@ -177,10 +177,17 @@ func parseNYFed(root *html.Node, address string) ([]Event, error) {
 				return
 			}
 			u, e := url.Parse(attr(a, "href"))
-			if e != nil || u.Scheme != "https" || u.Host != "www.bls.gov" || u.User != nil {
+			if e != nil || u.Scheme != "https" || u.User != nil {
+				return
+			}
+			retail := u.Host == "www.census.gov" && u.Path == "/retail/marts/www/marts_current.pdf" && content(a) == "Advance Retail Sales"
+			if !retail && u.Host != "www.bls.gov" {
 				return
 			}
 			indicator, title := nyfedIndicator(content(a))
+			if retail {
+				indicator, title = "advance-retail", retailTitle
+			}
 			if indicator == "" {
 				parseErr = errors.New("纽约联储新增 BLS 项目尚未识别，需核查")
 				return
@@ -202,9 +209,18 @@ func parseNYFed(root *html.Node, address string) ([]Event, error) {
 				return
 			}
 			ev := event("nyfed", month.Format("2006-01")+":"+indicator, title, address, "America/New_York")
+			if retail {
+				// NYFed names the release, but does not state the reference month.
+				// Retain the observed day until it can be matched during import.
+				ev.SourceID = retailPrefix + date
+				ev.URL = "https://www.newyorkfed.org/research/calendars/i-" + strings.ToLower(month.Format("Jan06")) + ".html"
+			}
 			ev.Start, ev.End, ev.Precision = at, at, "minute"
 			ev.Evidence = fmt.Sprintf("纽约联储日历：%s，%s %s（美国东部时间）。", content(a), date, clock[1])
-			ev.Conditions = nyfedNote
+			ev.Conditions = "补充当前及下一已发布月份中的 BLS 关键事件，非完整 BLS 日程；不表示 BLS 主源恢复。"
+			if retail {
+				ev.Conditions = "零售销售初值的近期发布时刻来自纽约联储月历。"
+			}
 			ev.Provenance = &Provenance{Mode: "supplement", AuthorityURL: u.String()}
 			events = append(events, ev)
 		})

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -13,6 +14,48 @@ import (
 
 	"finevent/internal/calendar"
 )
+
+func TestFollowedLegacyRetailEventKeepsWatchAndOneReminderSet(t *testing.T) {
+	now := time.Date(2026, 11, 10, 0, 0, 0, 0, time.UTC)
+	a, _, _ := reminderFixture(t, now)
+	s := &calendar.Store{DB: a.Store.DB}
+	const period = "advance-retail:2026-10"
+	e := calendar.Event{Source: "census", SourceID: period, Title: "美国零售销售（初值）", Kind: "macro",
+		Importance: 3, Start: "2026-11-16T08:30:00-05:00", End: "2026-11-16T08:30:00-05:00",
+		Timezone: "America/New_York", Precision: "minute", Status: "scheduled", URL: "https://www.census.gov/retail/release_schedule.html"}
+	old, err := s.Save(e, 0) // Pre-upgrade event, without supplementary source records.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec("INSERT INTO calendar_reminder_watches VALUES(?,1)", old.ID); err != nil {
+		t.Fatal(err)
+	}
+	reconcileTest(t, a, now)
+	if err := s.Import("census", nil, now.Unix(), errors.New("官方来源返回 HTTP 403")); err != nil {
+		t.Fatal(err)
+	}
+	e.Start, e.End = "2026-11-17T08:30:00-05:00", "2026-11-17T08:30:00-05:00"
+	recent := e
+	recent.Source, recent.SourceID, recent.URL = "nyfed", "advance-retail:2026-11-17", "https://www.newyorkfed.org/research/calendars/i-nov26.html"
+	for _, event := range []calendar.Event{recent, recent, e, e} {
+		if err := s.Import(event.Source, []calendar.Event{event}, now.Unix(), nil); err != nil {
+			t.Fatal(err)
+		}
+		reconcileTest(t, a, now)
+	}
+	var enabled, queued, cancelled int
+	if err := s.DB.QueryRow("SELECT enabled FROM calendar_reminder_watches WHERE event_id=?", old.ID).Scan(&enabled); err != nil || enabled != 1 {
+		t.Fatal(enabled, err)
+	}
+	if err := s.DB.QueryRow(`SELECT count(*) FILTER(WHERE d.status='queued'),count(*) FILTER(WHERE d.status='cancelled')
+		FROM calendar_reminder_jobs j JOIN deliveries d ON d.id=j.delivery_id WHERE j.event_id=?`, old.ID).Scan(&queued, &cancelled); err != nil || queued != 2 || cancelled != 2 {
+		t.Fatal(queued, cancelled, err)
+	}
+	history, err := s.History(old.ID)
+	if err != nil || len(history) != 3 || history[0].Event.Source != "census" || history[1].Event.Source != "nyfed" {
+		t.Fatal(history, err)
+	}
+}
 
 func TestFollowedBenchmarkKeepsReminderScheduleAcrossSources(t *testing.T) {
 	now := time.Date(2027, 8, 24, 0, 0, 0, 0, time.UTC)

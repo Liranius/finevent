@@ -14,6 +14,8 @@ const (
 	censusRetailURL = "https://www.census.gov/retail/release_schedule.html"
 	dolClaimsURL    = "https://oui.doleta.gov/unemploy/claims_arch.asp"
 	easternZone     = "America/New_York"
+	retailPrefix    = "advance-retail:"
+	retailTitle     = "美国零售销售（初值）"
 )
 
 // Both agencies place their two-column schedule immediately after its heading or introduction.
@@ -82,7 +84,7 @@ func parseRetailSales(root *html.Node, address string) ([]Event, error) {
 		if err != nil {
 			return nil, fmt.Errorf("零售销售发布时间无效：%w", err)
 		}
-		e := event("census", "advance-retail:"+period.Format("2006-01"), "美国零售销售（初值）", address, easternZone)
+		e := event("census", retailPrefix+period.Format("2006-01"), retailTitle, address, easternZone)
 		e.Start, e.End, e.Precision = at.Format(time.RFC3339), at.Format(time.RFC3339), "minute"
 		e.Evidence = fmt.Sprintf("零售与餐饮服务销售额，数据期 %s，发布于 %s（美国东部时间）。", period.Format("2006-01"), at.Format("2006-01-02 15:04"))
 		events = append(events, e)

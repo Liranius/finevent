@@ -55,7 +55,8 @@
 - [FOMC 日程](https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm)：当年及未来会议日期区间，不推算决议、发布会或纪要时刻。
 - [BLS 日历](https://www.bls.gov/schedule/news_release/bls.ics)：基于 UID 更新，处理 iCalendar 换行、时区、日期与取消；未支持的重复规则明确报错。开发网络及首次服务器同步均返回 403，尚未通过真实来源验收。
 - [BEA 日程](https://www.bea.gov/news/schedule)：按发布主题及数据期匹配，保留官方时间并应用美国东部夏令时。
-- 美国零售销售跟踪零售与餐饮服务销售额初值。按统计月份识别同一期，直接读取表内的发布日期和表头时刻，待定日期留待后续同步。[人口普查局发布日程](https://www.census.gov/retail/release_schedule.html)
+- 美国零售销售初值按统计月份识别同一期。人口普查局直接给出统计月份、发布日期和时刻，成功同步时优先采用。白宫 OMB 年表提供各月的计划日期，按原表保留“仅日期”；纽约联储月历补充近期的美东发布时刻。三个来源沿用同一事件 ID、关注和修订记录。若一个月多次发布，纽约联储仅匹配有明确统计期依据的日期。[人口普查局日程](https://www.census.gov/retail/release_schedule.html) · [OMB 年表](https://www.whitehouse.gov/omb/information-resources/guidance/us-principal-federal-economic-indicators/)
+- 三个来源独立记录同步结果。人口普查局返回 HTTP 403 时，部署验收核查 OMB 当年十二个月的日期，以及纽约联储本月或下月已入库的零售发布时刻；满足条件后按有来源限制签收，保留人口普查局的错误。
 - 美国首次申领失业救济人数按劳工部公布的每周规则和例外表生成，从美国东部当天排到下月底。节假日例外替换同一周的常规发布，改期沿用事件 ID 和关注记录。[劳工部发布安排](https://oui.doleta.gov/unemploy/claims_arch.asp)
 - 纽约联储是独立的 `nyfed` 补充来源，按美国东部日期同步当月及已发布的下月。首页提前切月时沿同站链接回取当月，整批校验通过才入库。已识别的 BLS 指标在该发布月只有一个统计期时沿用原事件。若一个月有同一指标的两次发布，保留年表列出的两个统计期。纽约联储的成功和 BLS 的错误分别记录。[纽约联储日历](https://www.newyorkfed.org/research/calendars/nationalecon_cal)
 

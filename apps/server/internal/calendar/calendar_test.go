@@ -244,11 +244,15 @@ func TestDurableSixHourCadenceAndBodyLimits(t *testing.T) {
 	if err := s.SyncDue(context.Background(), c); err != nil {
 		t.Fatal(err)
 	}
-	if calls != len(Sources()) {
+	expected := len(Sources())
+	if publishedOMB[time.Now().Year()] != "" {
+		expected++ // The direct annual PDF is also tried when the index is unavailable.
+	}
+	if calls != expected {
 		t.Fatal(calls)
 	}
 	s = &Store{DB: s.DB}
-	if err := s.SyncDue(context.Background(), c); err != nil || calls != len(Sources()) {
+	if err := s.SyncDue(context.Background(), c); err != nil || calls != expected {
 		t.Fatal("restart repeated polls", err, calls)
 	}
 	c.Transport = transport(func(r *http.Request) (*http.Response, error) {

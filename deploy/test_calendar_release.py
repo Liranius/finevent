@@ -53,6 +53,28 @@ def row():
 
 
 class CalendarReleaseTests(unittest.TestCase):
+    def test_census_403_needs_real_annual_and_timed_retail_coverage(self):
+        final = state(121601, failed='census')
+        final['sources']['census']['error'] = '官方来源返回 HTTP 403'
+        final['retail'] = [dict(source='omb', period='', release_day=f'2026-{m:02d}-15',
+                                start_day=f'2026-{m:02d}-15', precision='date') for m in range(1, 13)]
+        final['retail'].append(dict(source='nyfed', period='2026-10', release_day='2026-11-17',
+                                    start_day='2026-11-17', precision='minute'))
+        for case in ('both', 'annual_gap', 'only_bls', 'old_month', 'no_time', 'moved', 'different_error', 'no_second_sync'):
+            candidate = deepcopy(final)
+            if case == 'annual_gap': candidate['retail'].pop(3)
+            if case == 'only_bls': candidate['retail'].pop()
+            if case == 'old_month': candidate['retail'][-1].update(start_day='2025-11-17', release_day='2025-11-17')
+            if case == 'no_time': candidate['retail'][-1]['precision'] = 'date'
+            if case == 'moved': candidate['retail'][-1]['start_day'] = '2026-11-18'
+            if case == 'different_error': candidate['sources']['census']['error'] = 'invalid table'
+            if case == 'no_second_sync': candidate['sources']['omb']['last_attempt'] = 100000
+            results = release.calendar_results(state(), candidate)
+            with self.subTest(case=case):
+                accepted = release.source_acceptance(results, candidate, '2026-11-17')
+                self.assertEqual(accepted['status'], 'accepted_with_source_limits' if case == 'both' else 'needs_review')
+                self.assertFalse(results['census']['healthy'])
+
     def test_supplement_and_snapshot_do_not_turn_primary_failure_into_success(self):
         first, final = state(), state(121601, failed='bls')
         final['sources']['nbs'].update(last_success=0, error='timeout', count=0)
@@ -122,9 +144,22 @@ class CalendarReleaseTests(unittest.TestCase):
                   'calendar': release.calendar_results(state(), state(121601, failed='bls'))}
         release.validate_previous(report, run_id, 'current')
         previous = deepcopy(report)
-        for source in ('census', 'dol'):
+        for source in ('census', 'dol', 'omb'):
             previous['calendar'].pop(source)
         release.validate_previous(previous, run_id, 'current')
+        pre_omb = deepcopy(report)
+        pre_omb['calendar'].pop('omb')
+        release.validate_previous(pre_omb, run_id, 'current')
+        pre_omb['source_acceptance'] = {'retail_supplements_verified': True}
+        with self.assertRaises(RuntimeError):
+            release.validate_previous(pre_omb, run_id, 'current')
+        covered = deepcopy(report)
+        covered['calendar']['census'].update(healthy=False, latest={'error': '官方来源返回 HTTP 403'})
+        covered['source_acceptance'] = {'status': 'accepted_with_source_limits', 'retail_supplements_verified': True}
+        release.validate_previous(covered, run_id, 'current')
+        covered['source_acceptance']['retail_supplements_verified'] = False
+        with self.assertRaises(RuntimeError):
+            release.validate_previous(covered, run_id, 'current')
         for source in ('census', 'dol'):
             partial = deepcopy(report)
             partial['calendar'].pop(source)

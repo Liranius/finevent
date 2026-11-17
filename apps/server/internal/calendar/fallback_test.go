@@ -153,13 +153,17 @@ func TestNYFedOfficialMonthsAndDST(t *testing.T) {
 		file  string
 		count int
 		start string
-	}{{"nyfed-oct2026.html", 5, "2026-10-02T08:30:00-04:00"}, {"nyfed-nov2026.html", 6, "2026-11-03T10:00:00-05:00"}} {
+	}{{"nyfed-oct2026.html", 6, "2026-10-02T08:30:00-04:00"}, {"nyfed-nov2026.html", 7, "2026-11-03T10:00:00-05:00"}} {
 		events, err := Parse("nyfed", nyfedURL, fixture(t, tc.file), 2026)
 		if err != nil || len(events) != tc.count || events[0].Start != tc.start {
 			t.Fatal(tc, events, err)
 		}
 		for _, e := range events {
-			if e.Provenance.Mode != "supplement" || !strings.HasPrefix(e.Provenance.AuthorityURL, "https://www.bls.gov/") {
+			publisher := "https://www.bls.gov/"
+			if strings.HasPrefix(e.SourceID, retailPrefix) {
+				publisher = "https://www.census.gov/retail/marts/"
+			}
+			if e.Provenance.Mode != "supplement" || !strings.HasPrefix(e.Provenance.AuthorityURL, publisher) {
 				t.Fatal(e)
 			}
 		}
@@ -214,7 +218,7 @@ func TestNYFedNextMonthFetchAndFailurePreservesAtomicity(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fixture(t, "nyfed-nov2026.html")))}, nil
 	})
 	events, err := fetchNYFed(context.Background(), client, body, now)
-	if err != nil || len(events) != 11 || calls != 1 {
+	if err != nil || len(events) != 13 || calls != 1 {
 		t.Fatal(len(events), calls, err)
 	}
 	client.Transport = transport(func(r *http.Request) (*http.Response, error) {
@@ -251,13 +255,13 @@ func TestNYFedEarlyMonthRolloverFollowsPublishedPreviousMonth(t *testing.T) {
 			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(fixture(t, "nyfed-oct2026.html")))}, nil
 		})
 		events, err := fetchNYFed(context.Background(), client, body, now)
-		if err != nil || len(events) != 11 || calls != 1 {
+		if err != nil || len(events) != 13 || calls != 1 {
 			t.Fatalf("early month rollover: events=%d calls=%d error=%v", len(events), calls, err)
 		}
-		if events[0].Start != "2026-10-02T08:30:00-04:00" || events[5].Start != "2026-11-03T10:00:00-05:00" {
+		if events[0].Start != "2026-10-02T08:30:00-04:00" || events[6].Start != "2026-11-03T10:00:00-05:00" {
 			t.Fatal("actual source month or DST lost", events)
 		}
-		if events[0].URL != "https://www.newyorkfed.org/research/calendars/i-oct26.html" || events[5].URL != nyfedURL {
+		if events[0].URL != "https://www.newyorkfed.org/research/calendars/i-oct26.html" || events[6].URL != nyfedURL {
 			t.Fatal("source URLs do not identify the fetched pages")
 		}
 	}
@@ -306,7 +310,7 @@ func TestNYFedEarlyRolloverRequiresVerifiedCurrentMonth(t *testing.T) {
 				t.Fatal(sourceErr)
 			}
 			for _, source := range sources {
-				if source.ID == "nyfed" && (source.Count != 5 || source.LastSuccess != 100 || source.Error == "") {
+				if source.ID == "nyfed" && (source.Count != 6 || source.LastSuccess != 100 || source.Error == "") {
 					t.Fatal("prior data or success evidence lost", source)
 				}
 			}
@@ -330,7 +334,7 @@ func TestNYFedEarlyRolloverAcrossYear(t *testing.T) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(previous))}, nil
 	})
 	events, err := fetchNYFed(context.Background(), client, landing, time.Date(2027, 1, 1, 1, 0, 0, 0, time.UTC))
-	if err != nil || len(events) != 11 || !strings.HasPrefix(events[0].Start, "2026-12-") || !strings.HasPrefix(events[5].Start, "2027-01-") {
+	if err != nil || len(events) != 13 || !strings.HasPrefix(events[0].Start, "2026-12-") || !strings.HasPrefix(events[6].Start, "2027-01-") {
 		t.Fatal(events, err)
 	}
 }
