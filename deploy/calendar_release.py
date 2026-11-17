@@ -45,6 +45,12 @@ LOCK = Path('/run/lock/finevent-memory-recovery.lock')
 ID_PATTERN = re.compile(r'calendar-release-\d{8}T\d{6}Z-[a-f0-9]{8}')
 REQUIRED_HEALTHY_SOURCES = {'fomc', 'bea', 'nyfed', 'omb', 'dol'}
 SOURCE_IDS = REQUIRED_HEALTHY_SOURCES | {'nbs', 'bls', 'census'}
+# TODO: Remove this predecessor receipt once the first OMB-capable release has completed
+# observation and the pre-OMB release is no longer a rollback target.
+PRE_OMB_CENSUS_REVIEW = (
+    'calendar-release-20261116T162121Z-12a423ff',
+    '080ba3463c3a022520a9a66ad1d3761e09e92fb1f267077b27c214c30c7056be',
+)
 OBSERVATION_SECONDS = 6*3600+15*60
 # OMB adds an index and up to two annual PDFs to the serial source checks.
 INITIAL_SYNC_SECONDS = 15*60
@@ -444,9 +450,14 @@ def validate_previous(report, run_id, active_release, trend_review=None):
             and all(results[k].get('healthy') for k in REQUIRED_HEALTHY_SOURCES.intersection(results)),
             'Previous operation has issues beyond the reviewed source limitations')
     if 'census' in results and not results['census'].get('healthy'):
-        require('omb' in results and acceptance.get('status') == 'accepted_with_source_limits'
-                and acceptance.get('retail_supplements_verified') is True
-                and results['census'].get('latest', {}).get('error') == '官方来源返回 HTTP 403',
+        require(results['census'].get('latest', {}).get('error') == '官方来源返回 HTTP 403',
+                'Previous Census failure was not the reviewed HTTP 403')
+        if 'omb' not in results:
+            require((run_id, calendar_review.report_sha(report)) == PRE_OMB_CENSUS_REVIEW,
+                    'Previous Census failure lacks a reviewed pre-OMB report')
+            return
+        require(acceptance.get('status') == 'accepted_with_source_limits'
+                and acceptance.get('retail_supplements_verified') is True,
                 'Previous Census failure lacks verified retail coverage')
 
 

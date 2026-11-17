@@ -150,6 +150,19 @@ class CalendarReleaseTests(unittest.TestCase):
         pre_omb = deepcopy(report)
         pre_omb['calendar'].pop('omb')
         release.validate_previous(pre_omb, run_id, 'current')
+        census_403 = deepcopy(pre_omb)
+        census_403['calendar']['census'].update(healthy=False, latest={'error': '官方来源返回 HTTP 403'})
+        with self.assertRaisesRegex(RuntimeError, 'reviewed pre-OMB report'):
+            release.validate_previous(census_403, run_id, 'current')
+        with patch.object(release, 'PRE_OMB_CENSUS_REVIEW', (run_id, release.calendar_review.report_sha(census_403))):
+            release.validate_previous(census_403, run_id, 'current')
+            for mutation in ('another operation', 'revised report', 'new observation'):
+                changed = deepcopy(census_403)
+                if mutation == 'another operation': changed['id'] = 'calendar-release-20261118T000000Z-12345678'
+                if mutation == 'revised report': changed['finished_at'] = '2026-10-31T01:12:00+08:00'
+                if mutation == 'new observation': changed['calendar']['omb'] = report['calendar']['omb']
+                with self.subTest(mutation=mutation), self.assertRaises(RuntimeError):
+                    release.validate_previous(changed, changed['id'], 'current')
         pre_omb['source_acceptance'] = {'retail_supplements_verified': True}
         with self.assertRaises(RuntimeError):
             release.validate_previous(pre_omb, run_id, 'current')
