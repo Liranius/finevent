@@ -415,7 +415,7 @@ def runtime_passed(report, trend_review=None):
             and health_passed(report.get('health', {})))
 
 
-def validate_previous(report, run_id, active_release, trend_review=None):
+def validate_previous(report, run_id, active_release, trend_review=None, *, raw_report_sha=None):
     require(ID_PATTERN.fullmatch(run_id) and report.get('id') == run_id
             and report.get('status') in ('completed_for_review', 'completed_with_source_limits_for_review', 'needs_review')
             and report.get('stage') == 'completed' and not report.get('rollback') and not report.get('failure')
@@ -456,22 +456,32 @@ def validate_previous(report, run_id, active_release, trend_review=None):
             require((run_id, calendar_review.report_sha(report)) == PRE_OMB_CENSUS_REVIEW,
                     'Previous Census failure lacks a reviewed pre-OMB report')
             return
-        require(acceptance.get('status') == 'accepted_with_source_limits'
-                and acceptance.get('retail_supplements_verified') is True,
+        require(acceptance.get('retail_supplements_verified') is True,
                 'Previous Census failure lacks verified retail coverage')
+        if acceptance.get('status') != 'accepted_with_source_limits':
+            digest = calendar_review.nbs_recovery(report, raw_report_sha)
+            require(acceptance.get('status') == 'needs_review' and digest,
+                    'Previous calendar source acceptance lacks a matching recovery review')
+            return digest
 
 
 def review_previous(run_id):
     require(ID_PATTERN.fullmatch(run_id), 'Invalid previous operation ID')
     path = BACKUPS/run_id/'report.json'
-    previous = json.loads(path.read_text())
+    raw = path.read_bytes()
+    previous = json.loads(raw)
+    original_sha = hashlib.sha256(raw).hexdigest()
     trend_review = calendar_review.load(previous, BACKUPS)
-    validate_previous(previous, run_id, str((ROOT/'current').resolve()), trend_review)
+    nbs_digest = validate_previous(previous, run_id, str((ROOT/'current').resolve()), trend_review,
+                                   raw_report_sha=original_sha)
     unit = 'finevent-'+run_id+'.service'
     active = recovery.command('systemctl', 'show', unit, '-p', 'ActiveState', '--value').stdout.strip()
     require(active in ('inactive', 'failed'), 'Previous calendar observer is still active; do not interrupt it')
-    return {'id': run_id, 'report_sha256': recovery.sha(path),
-            'trend_source_review': ({**calendar_review.manifest()[run_id]} if trend_review else None)}
+    result = {'id': run_id, 'report_sha256': original_sha,
+              'trend_source_review': ({**calendar_review.manifest()[run_id]} if trend_review else None)}
+    if nbs_digest:
+        result['nbs_recovery_sha256'] = nbs_digest
+    return result
 
 
 def review_failed_preflight(run_id, report_sha256, after_review):
@@ -541,7 +551,8 @@ def prepare_replacement(directory, report):
                              'observer_stopped': False}
     recovery.save(directory/'report.json', report)
     if previous.get('stage') == 'completed':
-        validate_previous(previous, run_id, str((ROOT/'current').resolve()))
+        validate_previous(previous, run_id, str((ROOT/'current').resolve()),
+                          raw_report_sha=report['replacement']['evidence_sha256'])
         return
     validate_interruptible(previous, run_id, str((ROOT/'current').resolve()))
     require(0 <= time.time()-path.stat().st_mtime <= 180, 'Observer checkpoint is stale; preserve evidence for review')
@@ -561,13 +572,18 @@ def finish_replacement(directory, report):
     # Called with both transition and global deployment locks held after the old worker exits.
     run_id = report['replace_observation']
     path = BACKUPS/run_id/'report.json'
-    previous = json.loads(path.read_text())
+    raw = path.read_bytes()
+    previous = json.loads(raw)
     state = observer_state(run_id)
     require(state['ActiveState'] == 'inactive' and int(state['MainPID']) == 0, 'Previous observer has not stopped')
     validate_live_predecessor(previous)
     if previous.get('stage') == 'completed':
-        validate_previous(previous, run_id, str((ROOT/'current').resolve()))
-        return {'id': run_id, 'report_sha256': recovery.sha(path), 'observation_complete': True}
+        original_sha = hashlib.sha256(raw).hexdigest()
+        nbs_digest = validate_previous(previous, run_id, str((ROOT/'current').resolve()), raw_report_sha=original_sha)
+        result = {'id': run_id, 'report_sha256': original_sha, 'observation_complete': True}
+        if nbs_digest:
+            result['nbs_recovery_sha256'] = nbs_digest
+        return result
     validate_interruptible(previous, run_id, str((ROOT/'current').resolve()))
     require(report['replacement']['observer_stopped'], 'No recorded observer stop; cannot mark an interruption')
     previous.update(status='interrupted_for_repair', stage='observation_interrupted', finished_at=stamp(),

@@ -50,5 +50,25 @@
       "zaobao"
     ],
     "reason": "Using the approved fixed first-two-cycle scope: cls-telegraph failed at 2026-11-02 20:30 Asia/Shanghai and first succeeded at 21:00 (30 minutes). The first two chronological post-observation cycles at 21:00 and 21:30 both contain all nine successful sources. The latest cycle is healthy as of the 21:38:05 diagnostic. Original failures and prior operational issues remain preserved; uninterrupted coverage and a failure cause are not inferred."
+  },
+  "calendar-release-20261117T102627Z-1ac41f7c": {
+    "decision": "accepted_after_nbs_recovery",
+    "report_sha256": "69215c9a88970f0844a52173297d1c9572937b1db58faaa48109038a8e3866dd",
+    "review_sha256": "ada3abf4b5d8280a60381249fd0d852c383a58f3903e5cfb270d7e42fbf2b93b",
+    "receipt": {
+      "release_id": "calendar-release-20261117T102627Z-1ac41f7c",
+      "original_report_sha256": "69215c9a88970f0844a52173297d1c9572937b1db58faaa48109038a8e3866dd",
+      "running_release_matches": true,
+      "inspected_at": "2026-11-18T12:10:12.559561+00:00",
+      "nbs": {
+        "id": "nbs",
+        "last_attempt": 1795003726,
+        "last_success": 1795003726,
+        "error": "",
+        "count": 47,
+        "coverage_end": "2026-12-31"
+      },
+      "events": { "rows": 47, "coverage_end": "2026-12-31" }
+    }
   }
 }
