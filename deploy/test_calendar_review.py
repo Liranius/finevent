@@ -39,6 +39,56 @@ class CalendarReviewTests(unittest.TestCase):
                 expected_sources=[f'source{i}' for i in range(9)])
         return raw, entries
 
+    def test_preflight_accepts_only_the_reviewed_nbs_recovery(self):
+        run_id = 'calendar-release-20261117T102627Z-1ac41f7c'
+        entry = review.manifest()[run_id]
+        self.assertEqual(hashlib.sha256(json.dumps(entry['receipt']).encode()).hexdigest(), entry['review_sha256'])
+        report = deepcopy(self.report)
+        report.update(id=run_id, trendradar={'status': 'passed'},
+                      source_acceptance={'status': 'needs_review', 'retail_supplements_verified': True})
+        for name, error in [('nbs', '读取官方日程超时'), ('census', '官方来源返回 HTTP 403')]:
+            report['calendar'][name].update(healthy=False, latest={'error': error})
+
+        def bind(current):
+            registered = deepcopy(entry)
+            registered['report_sha256'] = review.report_sha(current)
+            registered['receipt']['original_report_sha256'] = registered['report_sha256']
+            registered['review_sha256'] = hashlib.sha256(json.dumps(registered['receipt']).encode()).hexdigest()
+            return registered
+
+        def verify(current):
+            return release.validate_previous(current, current['id'], '/current')
+
+        signed = bind(report)
+        with patch.object(review, 'manifest', return_value={run_id: signed}):
+            self.assertIsNone(review.load(report, None))  # No TrendRadar review to download.
+            self.assertEqual(verify(report), signed['review_sha256'])
+            with self.assertRaises(RuntimeError):
+                release.validate_previous(report, run_id, '/current', raw_report_sha='0' * 64)
+            for changed in ({**report, 'id': self.report['id']}, {**report, 'inspection_note': 'changed'}):
+                with self.assertRaises(RuntimeError):
+                    verify(changed)
+        for field in ('receipt', 'review_sha256', 'report_sha256'):
+            bad = {k: v for k, v in signed.items() if k != field}
+            with self.subTest(missing=field), patch.object(review, 'manifest', return_value={run_id: bad}), self.assertRaises(RuntimeError):
+                verify(report)
+        edited = deepcopy(signed)
+        edited['receipt']['events']['rows'] -= 1
+        with patch.object(review, 'manifest', return_value={run_id: edited}), self.assertRaises(RuntimeError):
+            verify(report)
+        for override in ({'error': '读取官方日程超时'}, {'last_success': 1}, {'count': 0}):
+            invalid = deepcopy(signed)
+            invalid['receipt']['nbs'].update(override)
+            invalid['review_sha256'] = hashlib.sha256(json.dumps(invalid['receipt']).encode()).hexdigest()
+            with self.subTest(nbs=override), patch.object(review, 'manifest', return_value={run_id: invalid}), self.assertRaises(RuntimeError):
+                verify(report)
+        for section, key, value in [('restart', 'status', 'failed'), ('resources', 'host_oom_kill_delta', 1),
+                                    ('source_acceptance', 'retail_supplements_verified', False)]:
+            changed = deepcopy(report)
+            changed[section][key] = value
+            with self.subTest(gate=key), patch.object(review, 'manifest', return_value={run_id: bind(changed)}), self.assertRaises(RuntimeError):
+                verify(changed)
+
     def finite_result(self):
         end = int(release.datetime.fromisoformat(self.report['finished_at']).timestamp())
         self.report['trendradar']['cycles'] = 2

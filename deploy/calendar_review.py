@@ -17,6 +17,35 @@ def report_sha(report):
     return hashlib.sha256(json.dumps(original, ensure_ascii=False, indent=2).encode()).hexdigest()
 
 
+def nbs_recovery(report, raw_report_sha):
+    """Return the receipt digest only for a reviewed timeout followed by a successful sync."""
+    entry = manifest().get(report['id'], {})
+    if entry.get('decision') != 'accepted_after_nbs_recovery':
+        return None
+    receipt = entry.get('receipt')
+    expected_sha = entry.get('report_sha256')
+    if not isinstance(receipt, dict) or report_sha(report) != expected_sha:
+        return None
+    if raw_report_sha is not None and raw_report_sha != expected_sha:
+        return None
+    # The collector wrote json.dumps with default separators, field order and no final newline.
+    digest = hashlib.sha256(json.dumps(receipt).encode()).hexdigest()
+    if (digest != entry.get('review_sha256') or receipt.get('release_id') != report['id']
+            or receipt.get('original_report_sha256') != entry['report_sha256']
+            or receipt.get('running_release_matches') is not True):
+        return None
+    source, events = receipt['nbs'], receipt['events']
+    inspected = datetime.fromisoformat(receipt['inspected_at'])
+    if (report['calendar']['nbs']['latest'].get('error') == '读取官方日程超时'
+            and source['id'] == 'nbs' and source['error'] == ''
+            and datetime.fromisoformat(report['finished_at']).timestamp()
+            < source['last_success'] == source['last_attempt'] <= inspected.timestamp()
+            and source['count'] == events['rows'] > 0
+            and source['coverage_end'] == events['coverage_end'] >= inspected.date().isoformat()):
+        return digest
+    return None
+
+
 def followup_accepted(entry, review, started, finished, inspected):
     scope = entry.get('followup_scope', 'all_after_observation')
     snapshots = review.get('original_trendradar', {}).get('expected_by_cycle')
@@ -107,7 +136,7 @@ def accepted(report, raw):
 
 def load(report, backups):
     entry = manifest().get(report.get('id'))
-    if entry is None:
+    if entry is None or entry.get('decision') == 'accepted_after_nbs_recovery':
         return None
     review_id = entry['review_id']
     if not re.fullmatch(r'calendar-observation-review-\d{8}T\d{6}Z-[a-f0-9]{8}', review_id):
